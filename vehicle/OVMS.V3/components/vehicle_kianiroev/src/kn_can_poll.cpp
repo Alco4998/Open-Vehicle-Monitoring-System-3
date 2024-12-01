@@ -29,62 +29,154 @@ static const char *TAG = "v-kianiroev";
 /**
  * Incoming poll reply messages
  */
-void OvmsVehicleKiaNiroEv::IncomingPollReply(const OvmsPoller::poll_job_t &job, uint8_t* data, uint8_t length)
-  {
-	//ESP_LOGD(TAG, "IPR %03x TYPE:%x PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", job.moduleid_low, job.type, job.pid, length, data[0], data[1], data[2], data[3],
-	//	data[4], data[5], data[6], data[7]);
+void OvmsVehicleKiaNiroEv::IncomingPollReply(const OvmsPoller::poll_job_t& job, uint8_t* data, uint8_t length)
+{
+	/* ESP_LOGD(TAG, "IPR %03x TYPE:%x PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", job.moduleid_low, job.type, job.pid, length, data[0], data[1], data[2], data[3],
+		data[4], data[5], data[6], data[7]); */
+	bool process_all = false;
 	switch (job.moduleid_rec)
-		{
+	{
 		// ****** IGMP *****
-		case 0x778:
-			IncomingIGMP(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+	case 0x778:
+		IncomingIGMP(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
 		// ****** OBC ******
-		case 0x7ed:
-			IncomingOBC(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+	case 0x7ed:
+		IncomingOBC(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
 		// ****** BCM ******
-		case 0x7a8:
-			IncomingBCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+	case 0x7a8:
+		IncomingBCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
-	  // ****** AirCon ******
-	  case 0x7bb:
-			IncomingAirCon(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+		// ****** AirCon ******
+	case 0x7bb:
+		process_all = true;
+		// IncomingAirCon(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
-	  // ****** ABS ESP ******
-	  case 0x7d9:
-			IncomingAbsEsp(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+		// ****** ABS ESP ******
+	case 0x7d9:
+		IncomingAbsEsp(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
 		// ******* VMCU ******
-		case 0x7ea:
-			IncomingVMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+	case 0x7ea:
+		IncomingVMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
 		// ******* MCU ******
-		case 0x7eb:
-			IncomingMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+	case 0x7eb:
+		IncomingMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
 		// ***** BMC ****
-		case 0x7ec:
-			IncomingBMC(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
-			break;
+	case 0x7ec:
+		IncomingBMC(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
 
 		// ***** CM ****
-		case 0x7ce:
-			IncomingCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+	case 0x7ce:
+		IncomingCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		break;
+
+	default:
+		ESP_LOGD(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
+		break;
+	}
+
+	// Enabled above as they are converted.
+	if (process_all)
+	{
+		std::string& rxbuf = obd_rxbuf;
+
+		// Assemble first and following frames to get complete reply
+
+		// init rx buffer on first (it tells us whole length)
+		if (job.mlframe == 0)
+		{
+			obd_module = job.moduleid_rec;
+			obd_rxtype = job.type;
+			obd_rxpid = job.pid;
+			obd_frame = 0;
+			rxbuf.clear();
+			ESP_LOGV(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Buffer: %d - Start",
+				job.moduleid_rec, job.type, job.pid, length + job.mlremain);
+			rxbuf.reserve(length + job.mlremain);
+		}
+		else
+		{
+			if (obd_frame == 0xffff)
+			{
+				XDISARM;
+				return; // Aborted
+			}
+			if ((obd_rxtype != job.type) || (obd_rxpid != job.pid) || (obd_module != job.moduleid_rec))
+			{
+				ESP_LOGD(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Dropped Frame",
+					job.moduleid_rec, job.type, job.pid);
+				XDISARM;
+				return;
+			}
+			++obd_frame;
+			if (obd_frame != job.mlframe)
+			{
+				obd_frame = 0xffff;
+				rxbuf.clear();
+				ESP_LOGD(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Skipped Frame: %d",
+					job.moduleid_rec, job.type, job.pid, obd_frame);
+				XDISARM;
+				return;
+			}
+		}
+		// Append each piece..
+		rxbuf.insert(rxbuf.end(), data, data + length);
+		/*
+		ESP_LOGV(TAG, "IoniqISOTP: IPR %03x TYPE:%x PID: %03x Frame: %d Append: %d Expected: %d - Append",
+		  job.moduleid_rec, job.type, job.pid, m_poll_ml_frame, length, job.mlremain);
+		*/
+		if (job.mlremain > 0)
+		{
+			// we need more - return for now.
+			XDISARM;
+			return;
+		}
+
+		Incoming_Full(job.type, job.moduleid_sent, job.moduleid_rec, job.pid, rxbuf);
+		obd_frame = 0xffff; // Received all - drop until we have a new frame 0
+		rxbuf.clear();
+	}
+	XDISARM;
+}
+
+void OvmsVehicleKiaNiroEv::Incoming_Full(uint16_t type, uint32_t module_sent, uint32_t module_rec, uint16_t pid, const std::string& data)
+{
+	ESP_LOGD(TAG, "IoniqISOTP: IPR %03" PRIx32 " TYPE:%x PID: %03x Message Size: %d",
+		module_rec, type, pid, data.size());
+	ESP_BUFFER_LOGV(TAG, data.data(), data.size());
+
+	switch (type)
+	{
+	case VEHICLE_POLL_TYPE_READDATA:
+		switch (module_rec)
+		{
+		case 0x7bb:
+			IncomingFull_AirCon(type, pid, data);
 			break;
 
 		default:
-			ESP_LOGD(TAG, "Unknown module: %03" PRIx32, job.moduleid_rec);
+			ESP_LOGD(TAG, "Unkown module_rec")
+				break;
+		}
+		break;
+
+	default:
+		ESP_LOGD(TAG, "Unkown type")
 			break;
-	  }
-  }
+	}
+}
 
 /**
  * Handle incoming messages from cluster.
@@ -149,6 +241,34 @@ void OvmsVehicleKiaNiroEv::IncomingAirCon(canbus* bus, uint16_t type, uint16_t p
 			break;
 		}
 	}
+}
+
+void OvmsVehicleKiaNiroEv::IncomingFull_AirCon(uint16_t type, uint16_t pid, const std::string& data)
+{
+	XARM("OvmsVehicleKiaNiroEv::IncomingOther_Full");
+	switch (pid)
+	{
+	case 0x0100:
+	{
+		uint8_t value;
+		if (get_uint_buff_be<1>(data, 2, value))
+		{
+			StdMetrics.ms_v_env_cabintemp->SetValue((value / 2.0) - 40, Celcius);
+		}
+		if (get_uint_buff_be<1>(data, 3, value))
+		{
+			StdMetrics.ms_v_env_temp->SetValue((value / 2.0) - 40, Celcius);
+		}
+		if (get_uint_buff_be<1>(data, 29, value))
+		{
+			StdMetrics.ms_v_pos_speed->SetValue(value);
+			CalculateAcceleration();
+		}
+	}
+	break;
+	}
+	XDISARM;
+}
 
 /**
  * Handle incoming messages from ABS ESP poll.
