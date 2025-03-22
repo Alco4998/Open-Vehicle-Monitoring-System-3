@@ -243,17 +243,19 @@ void OvmsVehicleKiaNiroEv::IncomingFull_AirCon(uint16_t type, uint16_t pid, cons
 	{
 		case 0x0100:
 		{
+			//  7e 50 07 | c8 ff 8a 81 8b 00 ef| 10 ff ff f1 ff 90 ff | ff 00 ff ff 00 00 00
 			uint8_t value;
-			if (get_uint_buff_be<1>(data, 2, value))
+			if (get_uint_buff_be<1>(data, 5, value))
 			{
 				StdMetrics.ms_v_env_cabintemp->SetValue((value / 2.0) - 40, Celcius);
 			}
-			if (get_uint_buff_be<1>(data, 3, value))
+			if (get_uint_buff_be<1>(data, 6, value))
 			{
 				StdMetrics.ms_v_env_temp->SetValue((value / 2.0) - 40, Celcius);
 			}
 			if (get_uint_buff_be<1>(data, 29, value))
 			{
+				ESP_LOGD(TAG, "Aircon1: %x", value);
 				StdMetrics.ms_v_pos_speed->SetValue(value);
 				CalculateAcceleration();
 			}

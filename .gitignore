@@ -65,4 +65,5 @@ docs/build/
 .vscode/
 vehicle/OVMS.V3/components/ovms_webserver/assets/charts.js.gz
 *.gz
-vehicle/OVMS.V3/wifi.bash
+Build.log
+flash.bash
