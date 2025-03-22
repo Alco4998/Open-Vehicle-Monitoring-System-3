@@ -162,13 +162,13 @@ void OvmsVehicleKiaNiroEv::Incoming_Full(uint16_t type, uint32_t module_sent, ui
 			break;
 
 		default:
-			ESP_LOGD(TAG, "Unkown module_rec")
+			ESP_LOGD(TAG, "Unkown module_rec");
 			break;
 		}
 		break;
 
 	default:
-		ESP_LOGD(TAG, "Unkown type")
+		ESP_LOGD(TAG, "Unkown type");
 		break;
 	}
 }
@@ -239,29 +239,27 @@ void OvmsVehicleKiaNiroEv::IncomingAirCon(canbus *bus, uint16_t type, uint16_t p
 
 void OvmsVehicleKiaNiroEv::IncomingFull_AirCon(uint16_t type, uint16_t pid, const std::string &data)
 {
-	XARM("OvmsVehicleKiaNiroEv::IncomingOther_Full");
 	switch (pid)
 	{
-	case 0x0100:
-	{
-		uint8_t value;
-		if (get_uint_buff_be<1>(data, 2, value))
+		case 0x0100:
 		{
-			StdMetrics.ms_v_env_cabintemp->SetValue((value / 2.0) - 40, Celcius);
+			uint8_t value;
+			if (get_uint_buff_be<1>(data, 2, value))
+			{
+				StdMetrics.ms_v_env_cabintemp->SetValue((value / 2.0) - 40, Celcius);
+			}
+			if (get_uint_buff_be<1>(data, 3, value))
+			{
+				StdMetrics.ms_v_env_temp->SetValue((value / 2.0) - 40, Celcius);
+			}
+			if (get_uint_buff_be<1>(data, 29, value))
+			{
+				StdMetrics.ms_v_pos_speed->SetValue(value);
+				CalculateAcceleration();
+			}
 		}
-		if (get_uint_buff_be<1>(data, 3, value))
-		{
-			StdMetrics.ms_v_env_temp->SetValue((value / 2.0) - 40, Celcius);
-		}
-		if (get_uint_buff_be<1>(data, 29, value))
-		{
-			StdMetrics.ms_v_pos_speed->SetValue(value);
-			CalculateAcceleration();
-		}
+		break;
 	}
-	break;
-	}
-	XDISARM;
 }
 
 /**
