@@ -465,7 +465,7 @@ void OvmsVehicleKiaNiroEv::Ticker1(uint32_t ticker)
 	if (IsKona())
 		{
 			// check battery power incase the car is just charging the 12v and not HV
-		if (m_b_bms_relay->IsStale() || m_b_bms_ignition->IsStale() || StdMetrics.ms_v_bat_power->AsFloat(0, kW) > 0 )
+		if (m_b_bms_relay->IsStale() || m_b_bms_ignition->IsStale())
 			{
 			isCharging=false;
 			}

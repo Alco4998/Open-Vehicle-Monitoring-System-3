@@ -136,6 +136,7 @@ class OvmsVehicleKiaNiroEv : public KiaVehicle
     void IncomingBMC(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
     void IncomingBCM(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
     void IncomingIGMP(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
+    void IncomingFull_IGMP(uint16_t type, uint16_t pid, const std::string &data);
     void IncomingAirCon(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
     void IncomingFull_AirCon(uint16_t type, uint16_t pid, const std::string &data);
     void IncomingAbsEsp(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);

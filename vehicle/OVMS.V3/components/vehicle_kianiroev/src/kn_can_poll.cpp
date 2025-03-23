@@ -38,7 +38,8 @@ void OvmsVehicleKiaNiroEv::IncomingPollReply(const OvmsPoller::poll_job_t& job, 
 	{
 		// ****** IGMP *****
 	case 0x778:
-		IncomingIGMP(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		// IncomingIGMP(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		process_all = true;
 		break;
 
 		// ****** OBC ******
@@ -161,6 +162,10 @@ void OvmsVehicleKiaNiroEv::Incoming_Full(uint16_t type, uint32_t module_sent, ui
 			IncomingFull_AirCon(type, pid, data);
 			break;
 
+		case 0x778:
+			IncomingFull_IGMP(type, pid, data);
+			break;
+
 		default:
 			ESP_LOGD(TAG, "Unkown module_rec");
 			break;
@@ -241,26 +246,32 @@ void OvmsVehicleKiaNiroEv::IncomingFull_AirCon(uint16_t type, uint16_t pid, cons
 {
 	switch (pid)
 	{
-		case 0x0100:
+	case 0x0100:
+		//  7e 50 07 | c8 ff 8a 81 8b 00 ef| 10 ff ff f1 ff 90 ff | ff 00 ff ff 00 00 00
+		uint8_t value;
+		if (get_uint_buff_be<1>(data, 5, value))
 		{
-			//  7e 50 07 | c8 ff 8a 81 8b 00 ef| 10 ff ff f1 ff 90 ff | ff 00 ff ff 00 00 00
-			uint8_t value;
-			if (get_uint_buff_be<1>(data, 5, value))
-			{
-				StdMetrics.ms_v_env_cabintemp->SetValue((value / 2.0) - 40, Celcius);
-			}
-			if (get_uint_buff_be<1>(data, 6, value))
-			{
-				StdMetrics.ms_v_env_temp->SetValue((value / 2.0) - 40, Celcius);
-			}
-			if (get_uint_buff_be<1>(data, 29, value))
-			{
-				ESP_LOGD(TAG, "Aircon1: %x", value);
-				StdMetrics.ms_v_pos_speed->SetValue(value);
-				CalculateAcceleration();
-			}
+			StdMetrics.ms_v_env_cabintemp->SetValue((value / 2.0) - 40, Celcius);
+		}
+		if (get_uint_buff_be<1>(data, 6, value))
+		{
+			StdMetrics.ms_v_env_temp->SetValue((value / 2.0) - 40, Celcius);
+		}
+		if (get_uint_buff_be<1>(data, 29, value))
+		{
+			ESP_LOGD(TAG, "Aircon1: %x", value);
+			StdMetrics.ms_v_pos_speed->SetValue(value);
+			CalculateAcceleration();
 		}
 		break;
+		/*
+		case 0x0102:
+		if (mlframe == 1)
+		{
+			// Coolant temp 1 & 2 in byte 1 and 2
+		}
+		break;
+		 */
 	}
 }
 
@@ -276,7 +287,7 @@ void OvmsVehicleKiaNiroEv::IncomingAbsEsp(canbus *bus, uint16_t type, uint16_t p
 	case 0xC101:
 		if (mlframe == 3)
 		{
-			//				m_v_emergency_lights->SetValue((CAN_BYTE(2)>>6) & 1);
+		//	m_v_emergency_lights->SetValue((CAN_BYTE(2)>>6) & 1);
 			m_v_emergency_lights->SetValue(CAN_BIT(2, 6));
 			m_v_traction_control->SetValue(CAN_BIT(1, 6));
 		}
@@ -753,6 +764,102 @@ void OvmsVehicleKiaNiroEv::IncomingIGMP(canbus *bus, uint16_t type, uint16_t pid
 	}
 }
 
+/**
+ * Handle incoming messages from IGMP-poll
+ * IGMP AKA; EPCU
+ *
+ */
+void OvmsVehicleKiaNiroEv::IncomingFull_IGMP(uint16_t type, uint16_t pid, const std::string &data)
+{
+	if (type == VEHICLE_POLL_TYPE_OBDIIEXTENDED)
+	{
+		uint32_t value;
+		switch (pid)
+		{
+		case 0xbc03:
+			if (get_uint_buff_be<1>(data, 5, value))
+			{
+				StdMetrics.ms_v_env_on->SetValue((value & 0x60) > 0);
+
+				m_v_seat_belt_driver->SetValue(get_bit<1>(value));
+				m_v_seat_belt_passenger->SetValue(get_bit<2>(value));
+
+				StdMetrics.ms_v_door_hood->SetValue(get_bit<0>(value));
+			}
+
+			if (get_uint_buff_be<1>(data, 4, value))
+			{
+				if (IsLHD())
+				{
+					StdMetrics.ms_v_door_fl->SetValue(get_bit<5>(value));
+					StdMetrics.ms_v_door_fr->SetValue(get_bit<4>(value));
+					StdMetrics.ms_v_door_rl->SetValue(get_bit<0>(value));
+					StdMetrics.ms_v_door_rr->SetValue(get_bit<2>(value));
+					m_v_door_lock_rl->SetValue(get_bit<1>(value));
+					m_v_door_lock_rr->SetValue(get_bit<3>(value));
+				}
+				else
+				{
+					StdMetrics.ms_v_door_fr->SetValue(get_bit<5>(value));
+					StdMetrics.ms_v_door_fl->SetValue(get_bit<4>(value));
+					StdMetrics.ms_v_door_rr->SetValue(get_bit<0>(value));
+					StdMetrics.ms_v_door_rl->SetValue(get_bit<2>(value));
+					m_v_door_lock_rr->SetValue(get_bit<1>(value));
+					m_v_door_lock_rl->SetValue(get_bit<3>(value));
+				}
+			}
+			break;
+		case 0xbc04:
+			// b5 3f 74 | ea 01 00 0e 43 -- Back seats
+			if (get_uint_buff_be<1>(data, 6, value))
+			{
+				/*
+				* Car data is by driver, but metrics is left/right
+				*/
+				if (IsLHD()) {
+					m_v_seat_belt_back_left->SetValue(get_bit<1>(value));
+					m_v_seat_belt_back_middle->SetValue(get_bit<3>(value));
+					m_v_seat_belt_back_right->SetValue(get_bit<2>(value));
+				} else {
+					m_v_seat_belt_back_left->SetValue(get_bit<2>(value));
+					m_v_seat_belt_back_middle->SetValue(get_bit<3>(value));
+					m_v_seat_belt_back_right->SetValue(get_bit<1>(value));
+				}
+			}
+
+			if (get_uint_buff_be<1>(data, 4, value)) 
+			{
+				if (IsLHD())
+				{
+					m_v_door_lock_fl->SetValue(get_bit<3>(value));
+					m_v_door_lock_fr->SetValue(get_bit<2>(value));
+				}
+				else
+				{
+					m_v_door_lock_fr->SetValue(get_bit<3>(value));
+					m_v_door_lock_fl->SetValue(get_bit<2>(value));
+				}
+			}
+
+
+			if (get_uint_buff_be<1>(data, 7, value))
+			{
+				StdMetrics.ms_v_env_headlights->SetValue(get_bit<4>(value));
+			} else {
+				ESP_LOGE(TAG, "IoniqISOTP.IGMP.FULL: Headlights fail retrieval");
+			}
+			break;
+
+		case 0xbc07:
+			// 08 41 f0 | 00 00 00 09 00 
+			if (get_uint_buff_be<1>(data, 5, value))
+			{
+				m_v_rear_defogger->SetValue(get_bit<1>(value));
+			}
+			break;
+		}
+	}
+}
 /**
  * Determine if this car is a Hyundai Kona
  *
