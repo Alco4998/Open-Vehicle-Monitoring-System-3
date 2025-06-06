@@ -600,13 +600,15 @@ void modem::State1Enter(modem_state1_t newstate)
   ESP_LOGI(TAG, "State: Enter %s state",ModemState1Name(newstate));
 
   // See if the driver want's to override our default behaviour
-  if (m_driver->State1Enter(newstate)) return;
+  if (m_driver->State1Enter(newstate)) {
+    m_powermode = newstate == PoweredOn ? On : Off;
+    return;
+  }
 
   switch (m_state1)
     {
     case CheckPowerOff:
       ClearNetMetrics();
-      PowerOff();
       m_state1_timeout_ticks = 15;
       m_state1_timeout_goto = PoweredOff;
       break;
@@ -632,6 +634,7 @@ void modem::State1Enter(modem_state1_t newstate)
     case PoweredOn:
       ClearNetMetrics();
       MyEvents.SignalEvent("system.modem.poweredon", NULL);
+      m_powermode = On;
       m_state1_timeout_ticks = 30;
       m_state1_timeout_goto = PoweringOn;
       break;
@@ -689,8 +692,8 @@ void modem::State1Enter(modem_state1_t newstate)
       ClearNetMetrics();
       StopPPP();
       StopNMEA();
+      PowerOff();
       MyEvents.SignalEvent("system.modem.stop",NULL);
-      PowerCycle();
       m_state1_timeout_ticks = 20;
       m_state1_timeout_goto = CheckPowerOff;
       break;
@@ -705,6 +708,7 @@ void modem::State1Enter(modem_state1_t newstate)
         m_driver = NULL;
         m_model.clear();
         }
+      m_powermode = Off;
       break;
 
     case PowerOffOn:
@@ -837,15 +841,17 @@ modem::modem_state1_t modem::State1Ticker1()
   switch (m_state1)
     {
     case None:
-      return CheckPowerOff;
+      PowerCycle();
+      return PoweringOff;
       break;
 
     case CheckPowerOff:
-      if (m_state1_ticker > 10) tx("AT\r\n");
+      m_buffer.EmptyAll(); // Drain it
+      if (m_state1_ticker%3 == 0) tx("AT\r\n");
       break;
 
     case PoweringOn:
-      tx("AT\r\n");
+      if (m_state1_ticker%3 == 0) tx("AT\r\n");
       break;
 
     case Identify:
@@ -1029,7 +1035,7 @@ void modem::StandardLineHandler(int channel, OvmsBuffer* buf, std::string line)
     line = m_line_buffer;
     }
 
-  if (line.compare(0, 2, "$G") == 0)
+  if (line.compare(0, 2, "$G") == 0 || line.compare(0, 12, "+CGNSSINFO: ") == 0 )
     {
     // GPS NMEA URC:
     if (m_nmea) m_nmea->IncomingLine(line);
@@ -1717,17 +1723,8 @@ void modem::SetSignalQuality(int newsq)
     {
     m_sq = newsq;
     ESP_LOGD(TAG, "Signal Quality is: %d (%d dBm)", m_sq, UnitConvert(sq, dbm, m_sq));
-    float current_dbm = UnitConvert(sq, dbm, m_sq);
     StdMetrics.ms_m_net_mdm_sq->SetValue(m_sq, sq);
-    if (StdMetrics.ms_m_net_type->AsString() == "modem")
-      {
-      StdMetrics.ms_m_net_sq->SetValue(m_sq, sq);
-      if (m_good_signal && current_dbm < m_bad_dbm)
-        m_good_signal = false;
-      if (!m_good_signal && current_dbm > m_good_dbm)
-        m_good_signal = true;
-      StdMetrics.ms_m_net_good_sq->SetValue(m_good_signal);
-      }
+    UpdateNetMetrics();
     }
   }
 
@@ -1757,6 +1754,12 @@ void modem::UpdateNetMetrics()
     {
     StdMetrics.ms_m_net_provider->SetValue(m_provider);
     StdMetrics.ms_m_net_sq->SetValue(m_sq, sq);
+    float current_dbm = UnitConvert(sq, dbm, m_sq);
+    if (m_good_signal && current_dbm < m_bad_dbm)
+      m_good_signal = false;
+    if (!m_good_signal && current_dbm > m_good_dbm)
+      m_good_signal = true;
+    StdMetrics.ms_m_net_good_sq->SetValue(m_good_signal);
     }
   }
 
