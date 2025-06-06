@@ -851,10 +851,23 @@ void OvmsVehicleKiaNiroEv::IncomingFull_IGMP(uint16_t type, uint16_t pid, const 
 			break;
 
 		case 0xbc07:
-			// 08 41 f0 | 00 00 00 09 00 
+			// 08 41 f0 | 00 00 00 09 00 ON or Charging 12V
+			// 08 41 f0 | 00 00 00 01 00 Off
+			// 08 41 f0 | 00 00 00 05 00 off with Charge port open
+			// 08 41 f0 | 00 00 80 05 00 ???
+			// 08 41 f0 | 00 00 80 00 00 Charging (and asleep?)
 			if (get_uint_buff_be<1>(data, 5, value))
 			{
 				m_v_rear_defogger->SetValue(get_bit<1>(value));
+				StdMetrics.ms_v_door_chargeport->SetValue(get_bit<0>(value) !=  get_bit<4>(value));
+			}
+
+			if (get_uint_buff_be<1>(data, 6, value)) {
+				ESP_LOGD(TAG, "IoniqISOTP.IGMP.State: %x", value);
+				// 05 is off with charge port open
+				// 00 is sleep
+				// 01 is off (not asleep)
+				// 09 is running
 			}
 			break;
 		}
