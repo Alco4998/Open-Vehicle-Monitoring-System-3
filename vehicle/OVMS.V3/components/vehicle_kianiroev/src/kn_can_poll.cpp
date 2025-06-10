@@ -44,12 +44,14 @@ void OvmsVehicleKiaNiroEv::IncomingPollReply(const OvmsPoller::poll_job_t& job, 
 
 		// ****** OBC ******
 	case 0x7ed:
-		IncomingOBC(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		// IncomingOBC(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		process_all = true;
 		break;
 
 		// ****** BCM ******
 	case 0x7a8:
 		IncomingBCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		process_all = true;
 		break;
 
 		// ****** AirCon ******
@@ -76,11 +78,13 @@ void OvmsVehicleKiaNiroEv::IncomingPollReply(const OvmsPoller::poll_job_t& job, 
 		// ***** BMC ****
 	case 0x7ec:
 		IncomingBMC(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		// process_all = true;
 		break;
 
 		// ***** CM ****
 	case 0x7ce:
-		IncomingCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		// IncomingCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		process_all = true;
 		break;
 
 	default:
@@ -165,6 +169,18 @@ void OvmsVehicleKiaNiroEv::Incoming_Full(uint16_t type, uint32_t module_sent, ui
 		case 0x778:
 			IncomingFull_IGMP(type, pid, data);
 			break;
+			
+		case 0x7ed:
+			IncomingFull_OBC(type, pid, data);
+			break;
+
+		case 0x7ce:
+			IncomingFull_CM(type,pid,data);
+			break;
+		
+		case 0x7a8:
+			IncomingFull_BCM(type,pid,data);
+			break;
 
 		default:
 			ESP_LOGD(TAG, "Unkown module_rec");
@@ -213,6 +229,26 @@ void OvmsVehicleKiaNiroEv::IncomingCM(canbus *bus, uint16_t type, uint16_t pid, 
 }
 
 /**
+ * Handle incoming messages from cluster.
+ */
+void OvmsVehicleKiaNiroEv::IncomingFull_CM(uint16_t type, uint16_t pid, const std::string &data)
+{
+	//	ESP_LOGI(TAG, "CM PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", pid, length, mlframe, data[0], data[1], data[2], data[3],
+	//			data[4], data[5], data[6]);
+	//	ESP_LOGI(TAG, "---");
+	int32_t value;
+	switch (pid)
+	{
+	case 0xb002:
+		if (get_buff_int_be<3>(data, 6, value))
+		{
+			StdMetrics.ms_v_pos_odometer->SetValue(value, GetConsoleUnits());
+		}
+		break;
+	}
+}
+
+/**
  * Handle incoming messages from Aircon poll.
  */
 void OvmsVehicleKiaNiroEv::IncomingAirCon(canbus *bus, uint16_t type, uint16_t pid, const uint8_t *data, uint8_t length, uint16_t mlframe, uint16_t mlremain)
@@ -247,7 +283,9 @@ void OvmsVehicleKiaNiroEv::IncomingFull_AirCon(uint16_t type, uint16_t pid, cons
 	switch (pid)
 	{
 	case 0x0100:
+		// 3 7 7 7 7 7
 		//  7e 50 07 | c8 ff 8a 81 8b 00 ef| 10 ff ff f1 ff 90 ff | ff 00 ff ff 00 00 00
+		//  7e 50 07 c8 ff 8a 81 8b 00 ef 10 ff ff f1 ff 90 ff ff 00 ff ff 00 00 00
 		uint8_t value;
 		if (get_uint_buff_be<1>(data, 5, value))
 		{
@@ -329,6 +367,60 @@ void OvmsVehicleKiaNiroEv::IncomingOBC(canbus *bus, uint16_t type, uint16_t pid,
 			kia_obc_ac_current = (float)CAN_UINT(0) / 100.0;
 		}
 		break;
+	}
+}
+
+/**
+ * Handle incoming messages from On Board Charger-poll
+ *
+ * - OBC-voltage
+ * - Pilot signal duty cycle
+ * - Charger temperature
+ */
+void OvmsVehicleKiaNiroEv::IncomingFull_OBC(uint16_t type, uint16_t pid, const std::string &data)
+{
+	uint32_t value;
+	switch (pid)
+	{
+		case 0x01:
+			// 4 7 7 7 7 7 7 7 3
+			//  example: ["ff","fe","57","fc","01","8a","f5","82","53","5b","e9","05","f0","9e","02","47","00","bc","05","b8","43","0e","c8","00","98","08","e5","02","13","76","00","00","00","00","01","f4","00","00","7c","86","00","00","9f","32","03","e8","05","c0","03","0d","0e","07","0d","fb","05","f0"]
+			//  example: ff fe 57 fc 01 8a f5 82 53 5b e9 05 f0 9e 02 47 00 bc 05 b8 43 0e c8 00 98 08 e5 02 13 76 00 00 00 00 01 f4 00 00 7c 86 00 00 9f 32 03 e8 05 c0 03 0d 0e 07 0d fb 05 f0
+			if (get_uint_buff_be<1>(data, 27, value))
+			{
+				m_obc_pilot_duty->SetValue((float)value / 10.0); // Untested
+			}
+
+			if (get_uint_buff_be<1>(data, 42, value))
+			{
+				StdMetrics.ms_v_charge_temp->SetValue((float)(value / 2.0) - 40.0, Celcius); // Untested
+			}
+
+			if (get_uint_buff_be<1>(data, 45, value))
+			{
+				kia_obc_ac_voltage = (float)value;
+			}
+
+			if (get_uint_buff_be<2>(data, 49, value))
+			{
+				float main_batt_voltage = value / 10.0;
+				ESP_LOGD(TAG, "OBC Main batt: %f", main_batt_voltage);
+			}
+			break;
+
+		// case 0x02:
+
+		// break;
+
+		case 0x03:
+			// 4 7 7 7 7 7 7 2
+			// example ["fe","ff","ff","e0","0c","72","20","06","97","06","8e","00","00","0b","60","00","00","48","09","00","0c","02","80","69","04","01","34","01","03","01","39","00","6d","00","6d","00","a6","01","1f","01","1a","00","29","00","2c","00","13","49"]
+			// example fe ff ff e0 0c 72 20 06 97 06 8e 00 00 0b 60 00 00 48 09 00 0c 02 80 69 04 01 34 01 03 01 39 00 6d 00 6d 00 a6 01 1f 01 1a 00 29 00 2c 00 13 49
+			if (get_uint_buff_be<2>(data, 4, value))
+			{
+				kia_obc_ac_current = (float)value / 100.0;
+			}
+			break;
 	}
 }
 
@@ -425,6 +517,110 @@ void OvmsVehicleKiaNiroEv::IncomingVMCU(canbus *bus, uint16_t type, uint16_t pid
 				StandardMetrics.ms_v_vin->SetValue(m_vin);
 			}
 		}
+		break;
+	}
+}
+
+void OvmsVehicleKiaNiroEv::IncomingFull_VMCU(uint16_t type, uint16_t pid, const std::string &data)
+{
+	// ESP_LOGD(TAG, "VMCU TYPE: %02x PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", type, pid, length, mlframe, data[0], data[1], data[2], data[3],
+	//		data[4], data[5], data[6]);
+	uint32_t value;
+	switch (pid)
+	{
+		// 4 7 7 4
+		case 0x01:
+			if (get_uint_buff_be<1>(data, 4, value))
+			{
+				kn_shift_bits.Park = get_bit<0>(value);
+				kn_shift_bits.Reverse = get_bit<1>(value);
+				kn_shift_bits.Neutral = get_bit<2>(value);
+				kn_shift_bits.Drive = get_bit<3>(value);
+
+				// ESP_LOGD(TAG, "VMCU PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", pid, length, mlframe, data[0], data[1], data[2], data[3],
+				//		data[4], data[5], data[6]);
+
+				// ESP_LOGD(TAG, "ABS/ESP %02x %02x", data[1], data[2]);
+
+				if (kn_shift_bits.Reverse)
+				{
+					StdMetrics.ms_v_env_gear->SetValue(-1);
+				}
+				else if (kn_shift_bits.Drive)
+				{
+					StdMetrics.ms_v_env_gear->SetValue(1);
+				}
+				else
+				{
+					StdMetrics.ms_v_env_gear->SetValue(0);
+				}
+			}
+			
+			if (get_uint_buff_be<2>(data, 11, value))
+			{
+				StdMetrics.ms_v_pos_speed->SetValue(value/100.0);
+			}
+			
+			if (get_uint_buff_be<2>(data, 12, value))
+			{
+				StdMetrics.ms_v_pos_speed->SetValue(value/10.0); 
+			}
+		break;
+
+		// 4 7 7 7 7 5
+		// Example: ["f8","ff","fc","00","01","01","00","00","00","93","07","a3","7a","80","39","a5","02","87","7f","0d","39","60","80","56","f5","21","70","00","00","01","01","01","00","00","00","07","00"]
+		// Example: f8 ff fc 00 01 01 00 00 00 93 07 a3 7a 80 39 a5 02 87 7f 0d 39 60 80 56 f5 21 70 00 00 01 01 01 00 00 00 07 00
+		case 0x02:
+			if (get_uint_buff_be<2>(data, 19, value))
+			{
+				StdMetrics.ms_v_bat_12v_voltage->SetValue(value / 1000.0, Volts);
+			}
+			
+			if (get_uint_buff_be<2>(data, 21, value))
+			{
+				// ms_v_bat_12v_current doesn't seem to be right
+				StdMetrics.ms_v_bat_12v_current->SetValue(((int16_t)value) / 1000.0, Amps);
+			}
+			
+			if (get_uint_buff_be<1>(data, 23, value))
+			{
+				m_b_aux_soc->SetValue(value, Percentage);
+			}
+		break;
+
+		case 0x80:
+			std::string vin;
+			// 4 7 7 7 7 7 7 7 7 7 7 7 7 2
+			// Example: 20 20 20 20 20 20 20 20 20 20 1e 09 0d 14 4b 4d 48 43 38 35 31 4a 55 4c 55 30 35 39 38 31 34 33 36 36 30 31 2d 30 45 32 35 35 20 20 20 20 20 20 20 20 20 20 20 1e 09 0d 14 41 45 56 4c 44 43 37 30 45 41 45 45 4b 35 4d 2d 4e 53 33 2d 44 30 30 30 41 45 35 31 30 34 32 31 00 00 00 00 00 00 00 00
+			if (get_buff_string(data,14,25,vin))
+				{
+				/* 
+					m_vin[0] = CAN_BYTE(3);
+					m_vin[1] = CAN_BYTE(4);
+					m_vin[2] = CAN_BYTE(5);
+					m_vin[3] = CAN_BYTE(6);
+				}
+				if (get_uint_buff_be<1>(data, 18, value))
+				{
+					m_vin[4] = CAN_BYTE(0);
+					m_vin[5] = CAN_BYTE(1);
+					m_vin[6] = CAN_BYTE(2);
+					m_vin[7] = CAN_BYTE(3);
+					m_vin[8] = CAN_BYTE(4);
+					m_vin[9] = CAN_BYTE(5);
+					m_vin[10] = CAN_BYTE(6);
+				}
+				if (get_uint_buff_be<1>(data, 25, value))
+				{
+					m_vin[11] = CAN_BYTE(0);
+					m_vin[12] = CAN_BYTE(1);
+					m_vin[13] = CAN_BYTE(2);
+					m_vin[14] = CAN_BYTE(3);
+					m_vin[15] = CAN_BYTE(4);
+					m_vin[16] = CAN_BYTE(5);
+				*/
+					StandardMetrics.ms_v_vin->SetValue(vin);
+				}
 		break;
 	}
 }
@@ -603,16 +799,13 @@ void OvmsVehicleKiaNiroEv::IncomingBCM(canbus *bus, uint16_t type, uint16_t pid,
 	{
 		switch (pid)
 		{
-		case 0xB00E:
+		/* case 0xB00E:
 			if (mlframe == 1)
 			{
 				// Charge door port not yet found for Kona - we'll fake it for now
-				if (!IsKona())
-				{
-					StdMetrics.ms_v_door_chargeport->SetValue(CAN_BIT(1, 4));
-				}
+				StdMetrics.ms_v_door_chargeport->SetValue(CAN_BIT(1, 4));
 			}
-			break;
+			break; */
 
 		case 0xB00C:
 			if (mlframe == 1)
@@ -679,6 +872,93 @@ void OvmsVehicleKiaNiroEv::IncomingBCM(canbus *bus, uint16_t type, uint16_t pid,
 			}
 			break;
 		}
+	}
+}
+
+/**
+ * Handle incoming messages from BCM-poll
+ *
+ *
+ */
+void OvmsVehicleKiaNiroEv::IncomingFull_BCM(uint16_t type, uint16_t pid, const std::string &data)
+{
+	uint8_t value;
+	switch (pid)
+	{
+		// 3 5 
+	case 0xB00E:
+		
+		if (get_uint_buff_be<1>(data, 4, value))
+		{
+			ESP_LOGD(TAG,"Chargeport: %x", value);
+			StdMetrics.ms_v_door_chargeport->SetValue(get_bit<5>(value));
+		}
+		break;
+		
+	/* 	// 3 5 
+	case 0xB00C:
+		if (get_uint_buff_be<1>(data, 4, value))
+		{
+			m_v_heated_handle->SetValue(get_bit<5>(value));
+		}
+		break;
+
+		// 3 7 7 3
+		// Duplicate of hif_can_poll.cpp:680
+	case 0xC002:
+		uint32_t idPart;
+		for (int idx = 0; idx < 4; ++idx)
+		{
+			if (get_uint_buff_be<4>(data, 4 + (idx * 4), idPart))
+			{
+				if (idPart != 0)
+				{
+					SET_TPMS_ID(idx, idPart);
+				}
+			}
+		}
+		break;
+
+		// 3 7 7 3
+		// Duplicate of hif_can_poll.cpp:691
+	case 0xC00B:
+		uint32_t iPSI, iTemp;
+        if (get_uint_buff_be<1>(data, 4, iPSI) && get_uint_buff_be<1>(data, 5, iTemp)) {
+          if (iPSI > 0) {
+			StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_FL, iPSI / 5.0, PSI);
+          }
+          if (iTemp > 0) {
+			StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_FL, iTemp - 50.0, Celcius);
+          }
+        }
+
+        if (get_uint_buff_be<1>(data, 9, iPSI) && get_uint_buff_be<1>(data, 10, iTemp)) {
+          if (iPSI > 0) {
+				StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_FR, iPSI / 5.0, PSI);
+          }
+          if (iTemp > 0) {
+				StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_FR, iTemp - 50.0, Celcius);
+          }
+        }
+
+        if (get_uint_buff_be<1>(data, 12, iPSI) && get_uint_buff_be<1>(data, 13, iTemp)) {
+          if (iPSI > 0) {
+				StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_RR, iPSI / 5.0, PSI);
+          }
+          if (iTemp > 0) {
+				StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_RR, iTemp - 50.0, Celcius);
+          }
+        }
+
+        if (get_uint_buff_be<1>(data, 16, iPSI) && get_uint_buff_be<1>(data, 17, iTemp)) {
+          if (iPSI > 0) {
+				StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_RL, iPSI / 5.0, PSI);
+          }
+          if (iTemp > 0) {
+				StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_RL, iTemp - 50.0, Celcius);
+          }
+        }
+	break; */
 	}
 }
 
@@ -859,7 +1139,7 @@ void OvmsVehicleKiaNiroEv::IncomingFull_IGMP(uint16_t type, uint16_t pid, const 
 			if (get_uint_buff_be<1>(data, 5, value))
 			{
 				m_v_rear_defogger->SetValue(get_bit<1>(value));
-				StdMetrics.ms_v_door_chargeport->SetValue(get_bit<0>(value) !=  get_bit<4>(value));
+				// StdMetrics.ms_v_door_chargeport->SetValue(get_bit<0>(value) !=  get_bit<4>(value));
 			}
 
 			if (get_uint_buff_be<1>(data, 6, value)) {
@@ -873,6 +1153,7 @@ void OvmsVehicleKiaNiroEv::IncomingFull_IGMP(uint16_t type, uint16_t pid, const 
 		}
 	}
 }
+
 /**
  * Determine if this car is a Hyundai Kona
  *

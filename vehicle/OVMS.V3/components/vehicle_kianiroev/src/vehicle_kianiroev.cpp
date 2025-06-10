@@ -107,7 +107,7 @@ static const OvmsPoller::poll_pid_t vehicle_kianiroev_polls[] =
 		{ 0x7d1, 0x7d9, VEHICLE_POLL_TYPE_OBDIIEXTENDED,  	0xc101, 		{       0,   27,  27 }, 0, ISOTP_STD },  // ABS/ESP - Emergency lights
 
 		{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,  		0x01, 			{       0,   58,  11 }, 0, ISOTP_STD }, 	// OBC - On board charger
-    //{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,  		0x02, 			{       0,   58,  11 } }, 	// OBC
+    //	{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,  		0x02, 			{       0,   58,  11 } }, 	// OBC
 		{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,  		0x03, 			{       0,   58,  11 }, 0, ISOTP_STD }, 	// OBC
 
 		{ 0x7e2, 0x7ea, VEHICLE_POLL_TYPE_OBDIIGROUP,  		0x01, 			{       0,    7,  19 }, 0, ISOTP_STD },  // VMCU - Shift position
@@ -343,34 +343,34 @@ void OvmsVehicleKiaNiroEv::ConfigChanged(OvmsConfigParam* param)
  * or off. Centralized so we can more easily make on and off mirror
  * images.
  */
-void OvmsVehicleKiaNiroEv::vehicle_kianiroev_car_on(bool isOn)
-  {
-	kn_shift_bits.CarOn=isOn;
-	StdMetrics.ms_v_env_awake->SetValue(isOn);
-  if (isOn)
-    {
-		// Car is ON
-  		ESP_LOGI(TAG,"CAR IS ON");
-    POLLSTATE_RUNNING;
-		StdMetrics.ms_v_env_charging12v->SetValue( true );
-    kia_ready_for_chargepollstate = true;
-    kia_park_trip_counter.Reset(POS_ODO, CUM_DISCHARGE, CUM_CHARGE);
-    BmsResetCellStats();
-    }
-  else if(!isOn)
-    {
-    // Car is OFF
-		ESP_LOGI(TAG,"CAR IS OFF");
-    kia_park_trip_counter.Update(POS_ODO, CUM_DISCHARGE, CUM_CHARGE);
-    kia_secs_with_no_client=0;
-  		StdMetrics.ms_v_pos_speed->SetValue( 0 );
-  	  StdMetrics.ms_v_pos_trip->SetValue( kia_park_trip_counter.GetDistance() );
-  		StdMetrics.ms_v_env_charging12v->SetValue( false );
-    kia_ready_for_chargepollstate = true;
-		kn_range_calc->tripEnded(kia_park_trip_counter.GetDistance(), kia_park_trip_counter.GetEnergyUsed());
-		SaveStatus();
-    	}
-  }
+	void OvmsVehicleKiaNiroEv::vehicle_kianiroev_car_on(bool isOn)
+	{
+		kn_shift_bits.CarOn = isOn;
+		StdMetrics.ms_v_env_awake->SetValue(isOn);
+		if (isOn)
+		{
+			// Car is ON
+			ESP_LOGI(TAG, "CAR IS ON");
+			POLLSTATE_RUNNING;
+			StdMetrics.ms_v_env_charging12v->SetValue(true);
+			kia_ready_for_chargepollstate = true;
+			kia_park_trip_counter.Reset(POS_ODO, CUM_DISCHARGE, CUM_CHARGE);
+			BmsResetCellStats();
+		}
+		else if (!isOn)
+		{
+			// Car is OFF
+			ESP_LOGI(TAG, "CAR IS OFF");
+			kia_park_trip_counter.Update(POS_ODO, CUM_DISCHARGE, CUM_CHARGE);
+			kia_secs_with_no_client = 0;
+			StdMetrics.ms_v_pos_speed->SetValue(0);
+			StdMetrics.ms_v_pos_trip->SetValue(kia_park_trip_counter.GetDistance());
+			StdMetrics.ms_v_env_charging12v->SetValue(false);
+			kia_ready_for_chargepollstate = true;
+			kn_range_calc->tripEnded(kia_park_trip_counter.GetDistance(), kia_park_trip_counter.GetEnergyUsed());
+			SaveStatus();
+		}
+	}
 
 /**
  * Ticker1: Called every second
@@ -445,10 +445,10 @@ void OvmsVehicleKiaNiroEv::Ticker1(uint32_t ticker)
 		}
 
 	// AC charge current on kona not yet found, so we'll fake it by looking at battery power
-	if (IsKona())
+	/* if (IsKona())
 		{
 		kia_obc_ac_current=-StdMetrics.ms_v_bat_power->AsFloat(0, Watts)/kia_obc_ac_voltage;
-		}
+		} */
 
   //Keep charging metrics up to date
 	if (kn_charge_bits.ChargingType2)  		// **** Type 2  charging ****
@@ -461,44 +461,44 @@ void OvmsVehicleKiaNiroEv::Ticker1(uint32_t ticker)
 	  }
 
 	// Check for charging status changes:
-	bool isCharging=false;
+	bool isCharging = false;
 	if (IsKona())
-		{
-			// check battery power incase the car is just charging the 12v and not HV
+	{
+		// check battery power incase the car is just charging the 12v and not HV
 		if (m_b_bms_relay->IsStale() || m_b_bms_ignition->IsStale())
-			{
-			isCharging=false;
-			}
+		{
+			isCharging = false;
+		}
 		else
-			{
+		{
 			// See https://docs.google.com/spreadsheets/d/1JyJnXh7DOvzTl0cbWZRpW9qB_OgEOM-w_XOiAY_a64o/edit#gid=1990128420
-			isCharging = (m_b_bms_relay->AsBool(false)-m_b_bms_ignition->AsBool(false)) == 1;
-			}
+			isCharging = (m_b_bms_relay->AsBool(false) - m_b_bms_ignition->AsBool(false)) == 1;
+		}
 		// fake charge port door
-		StdMetrics.ms_v_door_chargeport->SetValue(isCharging);
-		}
+		// StdMetrics.ms_v_door_chargeport->SetValue(isCharging);
+	}
 	else
-  //use same logic on eNiro as Kona to prevent false charging messages when regenerating Issue#
-  {
-  if (m_b_bms_relay->IsStale() || m_b_bms_ignition->IsStale())
-    {
-    isCharging=false;
-    }
-  else
-    {
-    // See https://docs.google.com/spreadsheets/d/1JyJnXh7DOvzTl0cbWZRpW9qB_OgEOM-w_XOiAY_a64o/edit#gid=1990128420
-    isCharging = (m_b_bms_relay->AsBool(false)-m_b_bms_ignition->AsBool(false)) == 1;
-    }
-  }
+	// use same logic on eNiro as Kona to prevent false charging messages when regenerating Issue#
+	{
+		if (m_b_bms_relay->IsStale() || m_b_bms_ignition->IsStale())
+		{
+			isCharging = false;
+		}
+		else
+		{
+			// See https://docs.google.com/spreadsheets/d/1JyJnXh7DOvzTl0cbWZRpW9qB_OgEOM-w_XOiAY_a64o/edit#gid=1990128420
+			isCharging = (m_b_bms_relay->AsBool(false) - m_b_bms_ignition->AsBool(false)) == 1;
+		}
+	}
 
-	if (isCharging)
-		{
+	if (isCharging && StdMetrics.ms_v_door_chargeport->AsBool())
+	{
 		HandleCharging();
-		}
-	else if (!isCharging && StdMetrics.ms_v_charge_inprogress->AsBool())
-		{
+	}
+	else if (StdMetrics.ms_v_charge_inprogress->AsBool())
+	{
 		HandleChargeStop();
-		}
+	}
 
 	if(m_poll_state==0 && StdMetrics.ms_v_door_chargeport->AsBool() && kia_ready_for_chargepollstate)	{
   		//Set pollstate charging if car is off and chargeport is open.
@@ -523,7 +523,7 @@ void OvmsVehicleKiaNiroEv::Ticker1(uint32_t ticker)
 			}
 		}
 
-	//**** AUX Battery drain prevention code ***
+	// *** AUX Battery drain prevention code ***
 	//If no clients are connected for 60 seconds, we'll turn off polling.
 	if((StdMetrics.ms_s_v2_peers->AsInt() + StdMetrics.ms_s_v3_peers->AsInt())==0)
 		{
@@ -735,28 +735,28 @@ void OvmsVehicleKiaNiroEv::HandleChargeStop()
 
 	// Reset trip counter for this charge
 	kia_charge_trip_counter.Reset(POS_ODO, CUM_DISCHARGE, CUM_CHARGE);
-  kia_secs_with_no_client = 0;
+  	kia_secs_with_no_client = 0;
 	SaveStatus();
 	}
 
 /**
  *  Sets the charge metrics
  */
-void OvmsVehicleKiaNiroEv::SetChargeMetrics(float voltage, float current, float climit, bool ccs)
+	void OvmsVehicleKiaNiroEv::SetChargeMetrics(float voltage, float current, float climit, bool ccs)
 	{
-	StdMetrics.ms_v_charge_voltage->SetValue( voltage, Volts );
-	StdMetrics.ms_v_charge_current->SetValue( current, Amps );
-	StdMetrics.ms_v_charge_mode->SetValue( ccs ? "performance" : "standard");
-	StdMetrics.ms_v_charge_climit->SetValue( climit, Amps);
-	StdMetrics.ms_v_charge_type->SetValue( ccs ? "ccs" : "type2");
-	StdMetrics.ms_v_charge_substate->SetValue("onrequest");
+		StdMetrics.ms_v_charge_voltage->SetValue(voltage, Volts);
+		StdMetrics.ms_v_charge_current->SetValue(current, Amps);
+		StdMetrics.ms_v_charge_mode->SetValue(ccs ? "performance" : "standard");
+		StdMetrics.ms_v_charge_climit->SetValue(climit, Amps);
+		StdMetrics.ms_v_charge_type->SetValue(ccs ? "ccs" : "type2");
+		StdMetrics.ms_v_charge_substate->SetValue("onrequest");
 
-	//ESP_LOGI(TAG, "SetChargeMetrics: volt=%1f current=%1f chargeLimit=%1f", voltage, current, climit);
+		// ESP_LOGI(TAG, "SetChargeMetrics: volt=%1f current=%1f chargeLimit=%1f", voltage, current, climit);
 
-	//"Typical" consumption based on battery temperature and ambient temperature.
-	float temp = ((StdMetrics.ms_v_bat_temp->AsFloat(Celcius) * 3) + StdMetrics.ms_v_env_temp->AsFloat(Celcius)) / 4;
-	float consumption = 15+(20-temp)*3.0/8.0; //kWh/100km
-	m_c_speed->SetValue( (voltage * current) / (consumption*10), Kph);
+		//"Typical" consumption based on battery temperature and ambient temperature.
+		float temp = ((StdMetrics.ms_v_bat_temp->AsFloat(Celcius) * 3) + StdMetrics.ms_v_env_temp->AsFloat(Celcius)) / 4;
+		float consumption = 15 + (20 - temp) * 3.0 / 8.0; // kWh/100km
+		m_c_speed->SetValue((voltage * current) / (consumption * 10), Kph);
 	}
 
 /**
