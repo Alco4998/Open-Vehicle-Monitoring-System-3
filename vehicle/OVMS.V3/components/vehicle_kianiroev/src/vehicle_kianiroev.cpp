@@ -491,7 +491,7 @@ void OvmsVehicleKiaNiroEv::Ticker1(uint32_t ticker)
 		}
 	}
 
-	if (isCharging && StdMetrics.ms_v_door_chargeport->AsBool())
+	if (isCharging && StdMetrics.ms_v_door_chargeport->AsBool() && kia_obc_ac_current != 0)
 	{
 		HandleCharging();
 	}

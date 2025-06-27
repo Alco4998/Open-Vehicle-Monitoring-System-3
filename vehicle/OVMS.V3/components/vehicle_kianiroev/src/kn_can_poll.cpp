@@ -50,7 +50,7 @@ void OvmsVehicleKiaNiroEv::IncomingPollReply(const OvmsPoller::poll_job_t& job, 
 
 		// ****** BCM ******
 	case 0x7a8:
-		IncomingBCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		// IncomingBCM(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
 		process_all = true;
 		break;
 
@@ -67,12 +67,14 @@ void OvmsVehicleKiaNiroEv::IncomingPollReply(const OvmsPoller::poll_job_t& job, 
 
 		// ******* VMCU ******
 	case 0x7ea:
-		IncomingVMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		// IncomingVMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		process_all = true;
 		break;
 
 		// ******* MCU ******
 	case 0x7eb:
-		IncomingMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		// IncomingMCU(job.bus, job.type, job.pid, data, length, job.mlframe, job.mlremain);
+		process_all = true;
 		break;
 
 		// ***** BMC ****
@@ -159,35 +161,60 @@ void OvmsVehicleKiaNiroEv::Incoming_Full(uint16_t type, uint32_t module_sent, ui
 
 	switch (type)
 	{
-	case VEHICLE_POLL_TYPE_READDATA:
-		switch (module_rec)
+		case VEHICLE_POLL_TYPE_OBDIIEXTENDED:
 		{
-		case 0x7bb:
-			IncomingFull_AirCon(type, pid, data);
-			break;
+			switch (module_rec)
+			{
+			case 0x7bb:
+				IncomingFull_AirCon(type, pid, data);
+				break;
 
-		case 0x778:
-			IncomingFull_IGMP(type, pid, data);
-			break;
+			case 0x778:
+				IncomingFull_IGMP(type, pid, data);
+				break;
+
+			case 0x7ce:
+				IncomingFull_CM(type,pid,data);
+				break;
 			
-		case 0x7ed:
-			IncomingFull_OBC(type, pid, data);
-			break;
+			case 0x7a8:
+				IncomingFull_BCM(type,pid,data);
+				break;
 
-		case 0x7ce:
-			IncomingFull_CM(type,pid,data);
-			break;
-		
-		case 0x7a8:
-			IncomingFull_BCM(type,pid,data);
-			break;
-
-		default:
-			ESP_LOGD(TAG, "Unkown module_rec");
-			break;
-		}
+			default:
+				ESP_LOGD(TAG, "Unkown module_rec");
+				break;
+			}}
 		break;
 
+		case VEHICLE_POLL_TYPE_OBDIIGROUP:
+		{
+			switch (module_rec)
+				{
+					case 0x7ed:
+						IncomingFull_OBC(type, pid, data);
+						break;
+
+					case 0x7ea:
+						IncomingFull_VMCU(type, pid, data);
+						break;
+					
+					case 0x7eb:
+						IncomingFull_MCU(type, pid, data);
+						break;
+				}
+			}
+		break;
+		case VEHICLE_POLL_TYPE_OBDII_1A:
+		{
+			switch (module_rec)
+				{
+					case 0x7ea:
+						IncomingFull_VMCU(type, pid, data);
+						break;
+				}
+			}
+		break;
 	default:
 		ESP_LOGD(TAG, "Unkown type");
 		break;
@@ -297,7 +324,7 @@ void OvmsVehicleKiaNiroEv::IncomingFull_AirCon(uint16_t type, uint16_t pid, cons
 		}
 		if (get_uint_buff_be<1>(data, 29, value))
 		{
-			ESP_LOGD(TAG, "Aircon1: %x", value);
+			ESP_LOGD(TAG, "Aircon Speed: %d", value);
 			StdMetrics.ms_v_pos_speed->SetValue(value);
 			CalculateAcceleration();
 		}
@@ -525,11 +552,11 @@ void OvmsVehicleKiaNiroEv::IncomingFull_VMCU(uint16_t type, uint16_t pid, const 
 {
 	// ESP_LOGD(TAG, "VMCU TYPE: %02x PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", type, pid, length, mlframe, data[0], data[1], data[2], data[3],
 	//		data[4], data[5], data[6]);
-	uint32_t value;
 	switch (pid)
 	{
 		// 4 7 7 4
 		case 0x01:
+			uint16_t value;
 			if (get_uint_buff_be<1>(data, 4, value))
 			{
 				kn_shift_bits.Park = get_bit<0>(value);
@@ -556,35 +583,48 @@ void OvmsVehicleKiaNiroEv::IncomingFull_VMCU(uint16_t type, uint16_t pid, const 
 				}
 			}
 			
-			if (get_uint_buff_be<2>(data, 11, value))
+			// This is Broken, it can exceed 256.25+660.5
+			/* if (get_uint_buff_be<2>(data, 11, value))
 			{
+				ESP_LOGD(TAG, "Speed (100)?: %d", value);
 				StdMetrics.ms_v_pos_speed->SetValue(value/100.0);
 			}
 			
 			if (get_uint_buff_be<2>(data, 12, value))
 			{
+				
 				StdMetrics.ms_v_pos_speed->SetValue(value/10.0); 
-			}
+			} */
 		break;
 
 		// 4 7 7 7 7 5
 		// Example: ["f8","ff","fc","00","01","01","00","00","00","93","07","a3","7a","80","39","a5","02","87","7f","0d","39","60","80","56","f5","21","70","00","00","01","01","01","00","00","00","07","00"]
 		// Example: f8 ff fc 00 01 01 00 00 00 93 07 a3 7a 80 39 a5 02 87 7f 0d 39 60 80 56 f5 21 70 00 00 01 01 01 00 00 00 07 00
 		case 0x02:
-			if (get_uint_buff_be<2>(data, 19, value))
+			uint16_t valueA, valueB;
+			if (get_uint_buff_be<2>(data, 13, valueA))
 			{
-				StdMetrics.ms_v_bat_12v_voltage->SetValue(value / 1000.0, Volts);
+				ESP_LOGD(TAG, "Speed (100)?: %d", value);
+				StdMetrics.ms_v_pos_speed->SetValue(value/100.0);
+			}
+
+			if (get_uint_buff_be<2>(data, 16, valueA))
+			{
+				// This is the closest appoximation i can find to the 12V Amperage
+				ESP_LOGD(TAG,"12V Amp: %d", valueA);
+				StdMetrics.ms_v_bat_12v_current->SetValue(valueA / 1000.0, Amps);
+			}
+
+			if (get_uint_buff_be<1>(data, 19, valueA) &&
+				get_uint_buff_be<1>(data, 20, valueB))
+			{
+				ESP_LOGD(TAG,"12V Voltage: %d", ((valueA << 8) + valueB));
+				StdMetrics.ms_v_bat_12v_voltage->SetValue(((valueA << 8) + valueB) / 1000.0, Volts);
 			}
 			
-			if (get_uint_buff_be<2>(data, 21, value))
+			if (get_uint_buff_be<1>(data, 23, valueA))
 			{
-				// ms_v_bat_12v_current doesn't seem to be right
-				StdMetrics.ms_v_bat_12v_current->SetValue(((int16_t)value) / 1000.0, Amps);
-			}
-			
-			if (get_uint_buff_be<1>(data, 23, value))
-			{
-				m_b_aux_soc->SetValue(value, Percentage);
+				m_b_aux_soc->SetValue(valueA, Percentage);
 			}
 		break;
 
@@ -592,33 +632,8 @@ void OvmsVehicleKiaNiroEv::IncomingFull_VMCU(uint16_t type, uint16_t pid, const 
 			std::string vin;
 			// 4 7 7 7 7 7 7 7 7 7 7 7 7 2
 			// Example: 20 20 20 20 20 20 20 20 20 20 1e 09 0d 14 4b 4d 48 43 38 35 31 4a 55 4c 55 30 35 39 38 31 34 33 36 36 30 31 2d 30 45 32 35 35 20 20 20 20 20 20 20 20 20 20 20 1e 09 0d 14 41 45 56 4c 44 43 37 30 45 41 45 45 4b 35 4d 2d 4e 53 33 2d 44 30 30 30 41 45 35 31 30 34 32 31 00 00 00 00 00 00 00 00
-			if (get_buff_string(data,14,25,vin))
+			if (get_buff_string(data,14,17,vin))
 				{
-				/* 
-					m_vin[0] = CAN_BYTE(3);
-					m_vin[1] = CAN_BYTE(4);
-					m_vin[2] = CAN_BYTE(5);
-					m_vin[3] = CAN_BYTE(6);
-				}
-				if (get_uint_buff_be<1>(data, 18, value))
-				{
-					m_vin[4] = CAN_BYTE(0);
-					m_vin[5] = CAN_BYTE(1);
-					m_vin[6] = CAN_BYTE(2);
-					m_vin[7] = CAN_BYTE(3);
-					m_vin[8] = CAN_BYTE(4);
-					m_vin[9] = CAN_BYTE(5);
-					m_vin[10] = CAN_BYTE(6);
-				}
-				if (get_uint_buff_be<1>(data, 25, value))
-				{
-					m_vin[11] = CAN_BYTE(0);
-					m_vin[12] = CAN_BYTE(1);
-					m_vin[13] = CAN_BYTE(2);
-					m_vin[14] = CAN_BYTE(3);
-					m_vin[15] = CAN_BYTE(4);
-					m_vin[16] = CAN_BYTE(5);
-				*/
 					StandardMetrics.ms_v_vin->SetValue(vin);
 				}
 		break;
@@ -637,6 +652,8 @@ void OvmsVehicleKiaNiroEv::IncomingMCU(canbus *bus, uint16_t type, uint16_t pid,
 	//	ESP_LOGI(TAG, "-");
 	switch (pid)
 	{
+		// 4 7 7 7 7 7 7 7 3
+		// Example: 07 ff ff ff 00 00 00 00 00 00 1c 00 08 0a 0c 0c fd ff ff ff 61 d7 cd ab c2 cd 0c 01 b7 04 36 00 0e 62 d7 26 a8 2f c1 cd 23 00 b2 33 00 00 00 00 00 00 00 00 00 00 00 00
 	case 0x02:
 		if (type == VEHICLE_POLL_TYPE_OBDIIGROUP)
 		{
@@ -645,11 +662,33 @@ void OvmsVehicleKiaNiroEv::IncomingMCU(canbus *bus, uint16_t type, uint16_t pid,
 				StdMetrics.ms_v_mot_temp->SetValue((int8_t)CAN_BYTE(4)); // TODO Correct? Could be byte 2 *2
 				StdMetrics.ms_v_inv_temp->SetValue((int8_t)CAN_BYTE(3)); // TODO Correct? Could be byte 1 *2
 			}
-			//				else if (mlframe == 3)
-			//					{
-			//					ESP_LOGD(TAG, "VMCU PID:%02x %x %02x %02x %02x %02x %02x %02x %02x %02x", pid, length, mlframe, data[0], data[1], data[2], data[3],
-			//							data[4], data[5], data[6]);
-			//					}
+		}
+		break;
+	}
+}
+
+
+/**
+ * Handle incoming messages from VMCU-poll
+ *
+ * -
+ */
+void OvmsVehicleKiaNiroEv::IncomingFull_MCU(uint16_t type, uint16_t pid, const std::string &data)
+{
+	int8_t value;
+	switch (pid)
+	{
+		// 4 7 7 7 7 7 7 7 3
+		// Example: 07 ff ff ff 00 00 00 00 00 00 1c 00 08 0a 0c 0c fd ff ff ff 61 d7 cd ab c2 cd 0c 01 b7 04 36 00 0e 62 d7 26 a8 2f c1 cd 23 00 b2 33 00 00 00 00 00 00 00 00 00 00 00 00
+	case 0x02:
+		if (get_uint_buff_be<1>(data, 15, value))
+		{
+			StdMetrics.ms_v_mot_temp->SetValue(value); 
+		}
+
+		if (get_uint_buff_be<1>(data, 14, value))
+		{
+			StdMetrics.ms_v_inv_temp->SetValue(value); 
 		}
 		break;
 	}
@@ -825,7 +864,9 @@ void OvmsVehicleKiaNiroEv::IncomingBCM(canbus *bus, uint16_t type, uint16_t pid,
 			{
 				lVal = (uint32_t)CAN_UINT(0) | (kia_tpms_id[1] & 0xffff0000);
 				SET_TPMS_ID(1, lVal);
+
 				SET_TPMS_ID(2, CAN_UINT32(2));
+
 				lVal = (kia_tpms_id[1] & 0x00ffffff) | ((uint32_t)CAN_BYTE(5) << 24);
 				SET_TPMS_ID(3, lVal);
 			}
@@ -882,83 +923,90 @@ void OvmsVehicleKiaNiroEv::IncomingBCM(canbus *bus, uint16_t type, uint16_t pid,
  */
 void OvmsVehicleKiaNiroEv::IncomingFull_BCM(uint16_t type, uint16_t pid, const std::string &data)
 {
-	uint8_t value;
+	uint32_t value;
 	switch (pid)
 	{
 		// 3 5 
-	case 0xB00E:
-		
+	case 0xB00E:{
 		if (get_uint_buff_be<1>(data, 4, value))
 		{
 			ESP_LOGD(TAG,"Chargeport: %x", value);
 			StdMetrics.ms_v_door_chargeport->SetValue(get_bit<5>(value));
 		}
-		break;
+		} break;
 		
-	/* 	// 3 5 
-	case 0xB00C:
+		// 3 5 
+	case 0xB00C:{
 		if (get_uint_buff_be<1>(data, 4, value))
 		{
 			m_v_heated_handle->SetValue(get_bit<5>(value));
 		}
-		break;
+		}break;
 
 		// 3 7 7 3
-		// Duplicate of hif_can_poll.cpp:680
-	case 0xC002:
-		uint32_t idPart;
-		for (int idx = 0; idx < 4; ++idx)
-		{
-			if (get_uint_buff_be<4>(data, 4 + (idx * 4), idPart))
-			{
-				if (idPart != 0)
-				{
-					SET_TPMS_ID(idx, idPart);
-				}
-			}
+	case 0xC002: {
+		uint32_t lVal;
+		if (get_uint_buff_be<3>(data, 2, value)){
+			SET_TPMS_ID(0, value);
 		}
+
+		if (get_uint_buff_be<2>(data, 6, value)){
+			lVal = (kia_tpms_id[1] & 0x0000ffff) | (value << 16);
+			SET_TPMS_ID(1, lVal);
+		}
+
+		if (get_uint_buff_be<2>(data, 10, value)){
+			lVal = value | (kia_tpms_id[1] & 0xffff0000);
+			SET_TPMS_ID(1, lVal);
+		}
+		if (get_uint_buff_be<3>(data, 12, value)){
+			SET_TPMS_ID(2, value);
+		}
+
+		if (get_uint_buff_be<1>(data, 15, value)){
+			lVal = (kia_tpms_id[1] & 0x00ffffff) | (value << 24);
+			SET_TPMS_ID(3, lVal);
+		}
+
+		if (get_uint_buff_be<3>(data, 17, value)){
+			lVal = value | (kia_tpms_id[3] & 0xff000000);
+			SET_TPMS_ID(3, lVal);
+		}
+	}
 		break;
 
 		// 3 7 7 3
-		// Duplicate of hif_can_poll.cpp:691
-	case 0xC00B:
+	case 0xC00B: {
 		uint32_t iPSI, iTemp;
-        if (get_uint_buff_be<1>(data, 4, iPSI) && get_uint_buff_be<1>(data, 5, iTemp)) {
-          if (iPSI > 0) {
+		if (get_uint_buff_be<1>(data, 4, iPSI) && iPSI > 0) {
 			StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_FL, iPSI / 5.0, PSI);
-          }
-          if (iTemp > 0) {
+		}
+		if (get_uint_buff_be<1>(data, 5, iTemp) && iTemp > 0) {
 			StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_FL, iTemp - 50.0, Celcius);
-          }
+		}
+
+		if (get_uint_buff_be<1>(data, 9, iPSI) && iPSI > 0) {
+			StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_FR, iPSI / 5.0, PSI);
+		}
+		if (get_uint_buff_be<1>(data, 10, iTemp) && iTemp > 0) {
+			StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_FR, iTemp - 50.0, Celcius);
         }
 
-        if (get_uint_buff_be<1>(data, 9, iPSI) && get_uint_buff_be<1>(data, 10, iTemp)) {
-          if (iPSI > 0) {
-				StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_FR, iPSI / 5.0, PSI);
-          }
-          if (iTemp > 0) {
-				StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_FR, iTemp - 50.0, Celcius);
-          }
+		if (get_uint_buff_be<1>(data, 12, iPSI) && iPSI > 0) {
+			StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_RR, iPSI / 5.0, PSI);
+		}
+		if (get_uint_buff_be<1>(data, 13, iTemp) && iTemp > 0) {
+			StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_RR, iTemp - 50.0, Celcius);
         }
 
-        if (get_uint_buff_be<1>(data, 12, iPSI) && get_uint_buff_be<1>(data, 13, iTemp)) {
-          if (iPSI > 0) {
-				StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_RR, iPSI / 5.0, PSI);
-          }
-          if (iTemp > 0) {
-				StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_RR, iTemp - 50.0, Celcius);
-          }
-        }
-
-        if (get_uint_buff_be<1>(data, 16, iPSI) && get_uint_buff_be<1>(data, 17, iTemp)) {
-          if (iPSI > 0) {
-				StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_RL, iPSI / 5.0, PSI);
-          }
-          if (iTemp > 0) {
-				StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_RL, iTemp - 50.0, Celcius);
-          }
-        }
-	break; */
+		if (get_uint_buff_be<1>(data, 16, iPSI) && iPSI > 0) {
+			StdMetrics.ms_v_tpms_pressure->SetElemValue(MS_V_TPMS_IDX_RL, iPSI / 5.0, PSI);
+		}
+		if (get_uint_buff_be<1>(data, 17, iTemp) && iTemp > 0) {
+			StdMetrics.ms_v_tpms_temp->SetElemValue(MS_V_TPMS_IDX_RL, iTemp - 50.0, Celcius);
+		}
+	}
+	break;
 	}
 }
 
