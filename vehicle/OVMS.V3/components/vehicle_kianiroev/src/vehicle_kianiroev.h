@@ -137,6 +137,7 @@ class OvmsVehicleKiaNiroEv : public KiaVehicle
     void IncomingMCU(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
     void IncomingFull_MCU(uint16_t type, uint16_t pid, const std::string &data);
     void IncomingBMC(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
+    void IncomingFull_BMC(uint16_t type, uint16_t pid, const std::string &data);
     void IncomingBCM(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
     void IncomingFull_BCM(uint16_t type, uint16_t pid, const std::string &data);
     void IncomingIGMP(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
@@ -144,6 +145,7 @@ class OvmsVehicleKiaNiroEv : public KiaVehicle
     void IncomingAirCon(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
     void IncomingFull_AirCon(uint16_t type, uint16_t pid, const std::string &data);
     void IncomingAbsEsp(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
+    void IncomingFull_AbsEsp(uint16_t type, uint16_t pid, const std::string &data);
     void IncomingCM(canbus* bus, uint16_t type, uint16_t pid, const uint8_t* data, uint8_t length, uint16_t mlframe, uint16_t mlremain);
     void IncomingFull_CM(uint16_t type, uint16_t pid, const std::string &data);
     void RequestNotify(unsigned int which);
