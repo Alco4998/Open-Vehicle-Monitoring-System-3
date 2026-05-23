@@ -36,77 +36,133 @@ static const char *TAG = "v-smarteq";
 #include "buffered_shell.h"
 #include "pcp.h"
 
-// Set TPMS pressure and alert values
-void OvmsVehicleSmartEQ::setTPMSValue(int index, int indexcar) {
-  if (index < 0 || index > 3 || indexcar < 0 || indexcar > 3) {
-    ESP_LOGE(TAG, "Invalid TPMS index: %d or indexcar: %d", index, indexcar);
-    return;
-  }
-
-  float _pressure = m_tpms_pressure[index];
-  float _temp = m_tpms_temperature[index];
-  bool _lowbatt = m_tpms_lowbatt[index];
-  bool _missing_tx = m_tpms_missing_tx[index];
+// Set TPMS pressure, temperature and alert values
+void OvmsVehicleSmartEQ::setTPMSValue() {
   
-  // Validate pressure value
-  if (_pressure < 0.0f || _pressure > 500.0f) {
-    ESP_LOGE(TAG, "Invalid TPMS pressure value: %f", _pressure);
-    return;
-  }
+  std::vector<string> tpms_layout = OvmsVehicle::GetTpmsLayout();
+  int count = (int)tpms_layout.size();
+  std::vector<float> tpms_pressure(count, 0.0f);
+  std::vector<float> tpms_temp(count, 0.0f);
+  std::vector<short> tpms_alert(count, 0);
 
-  StdMetrics.ms_v_tpms_pressure->SetElemValue(indexcar, _pressure);
-  if (m_tpms_temp_enable) StdMetrics.ms_v_tpms_temp->SetElemValue(indexcar, _temp);
+  float _threshold_front = m_front_pressure;
+  float _threshold_rear = m_rear_pressure;
+  float _threshold_warn = m_pressure_warning;
+  float _threshold_alert = m_pressure_alert;
+
+  // Pressure validation limits
+  static const float PRESSURE_MIN = 10.0f;   // Below this = sensor not working
+  static const float PRESSURE_MAX = 500.0f;  // Above this = invalid reading
+  static const float TEMP_MIN = -40.0f;
+  static const float TEMP_MAX = 90.0f;
+
+  for (int i=0; i < count; i++) 
+    {
+    int indexcar = m_tpms_index[i];
+    float _pressure = m_tpms_pressure[indexcar];
+    float _temp = m_tpms_temperature[indexcar];
+    bool _lowbatt = m_tpms_lowbatt[indexcar];
+    bool _missing_tx = m_tpms_missing_tx[indexcar];
+    
+    short _alert = 0;
+    bool _flag = false;
+
+    // Validate pressure value and check if sensor is active
+    bool pressure_valid = (_pressure >= PRESSURE_MIN && _pressure < PRESSURE_MAX);
+    bool alerts_enabled = m_tpms_alert_enable;
+    
+    if (pressure_valid)
+      {
+      tpms_pressure[i] = _pressure;
+      _flag = true;
+      }
+    
+    // Validate and set temperature
+    if (m_tpms_temp_enable && _temp >= TEMP_MIN && _temp < TEMP_MAX) 
+      {
+      tpms_temp[i] = _temp;
+      }
+    
+    // Handle alert conditions only if sensor is working and alerts are enabled
+    if (!pressure_valid || !alerts_enabled) 
+      {
+      // Sensor not working or alerts disabled - clear all alerts
+      _lowbatt = false;
+      _missing_tx = false;
+      tpms_alert[i] = 0;
+      _flag = false;
+      
+      // Clear stored alert states
+      mt_tpms_low_batt->SetElemValue(i, 0);
+      mt_tpms_missing_tx->SetElemValue(i, 0);
+      }
+    else
+      {
+      // Sensor working and alerts enabled - update alert states
+      mt_tpms_low_batt->SetElemValue(i, _lowbatt);
+      mt_tpms_missing_tx->SetElemValue(i, _missing_tx);
+      }
+    
+    // Calculate pressure deviation alerts
+    if (alerts_enabled && _flag)
+      {
+      // Get reference pressure based on front/rear position
+      float reference_pressure = (i < (count / 2)) ? _threshold_front : _threshold_rear;
+      
+      // Calculate deviation from reference pressure      
+      float deviation = _pressure - reference_pressure;
+      float abs_deviation = std::abs(deviation);
+      
+      // Priority: low battery > missing transmission > pressure deviation
+      if (_lowbatt) 
+        {
+        _alert = 1;
+        MyNotify.NotifyStringf("alert", "tpms.lowbatt", 
+                               "TPMS low battery on wheel %s", 
+                               tpms_layout[i].c_str());
+        }
+      else if (_missing_tx) 
+        {
+        _alert = 2;
+        MyNotify.NotifyStringf("alert", "tpms.missing_tx", 
+                               "TPMS missing transmission on wheel %s", 
+                               tpms_layout[i].c_str());
+        }
+      else if (abs_deviation > _threshold_alert) 
+        {
+        _alert = 2;
+        MyNotify.NotifyStringf("alert", "tpms.alert", 
+                               "TPMS pressure alert on wheel %s: %.1f kPa (ref: %.1f kPa)", 
+                               tpms_layout[i].c_str(), _pressure, reference_pressure);
+        }
+      else if (abs_deviation > _threshold_warn) 
+        {
+        _alert = 1;
+        MyNotify.NotifyStringf("alert", "tpms.warning", 
+                               "TPMS pressure warning on wheel %s: %.1f kPa (ref: %.1f kPa)", 
+                               tpms_layout[i].c_str(), _pressure, reference_pressure);
+        }
+      
+      tpms_alert[i] = _alert;
+      }
+    else
+      {
+      tpms_alert[i] = 0;
+      }
+    } // end for loop
+    
+  // Set the metrics  
+  StdMetrics.ms_v_tpms_pressure->SetValue(tpms_pressure);
   
-  mt_tpms_pressure->SetElemValue(indexcar, _pressure);
-  mt_tpms_temp->SetElemValue(indexcar, _temp);
-  mt_tpms_low_batt->SetElemValue(indexcar, _lowbatt);
-  mt_tpms_missing_tx->SetElemValue(indexcar, _missing_tx);
-
-  // Skip alert processing if pressure is too low or alerts are disabled
-  if (_pressure < 10.0f || !m_tpms_alert_enable) {
-    StdMetrics.ms_v_tpms_alert->SetElemValue(indexcar, 0);
-    return;
-  }
-
-  // Get reference pressure based on front/rear position
-  float reference_pressure = (indexcar < 2) ? m_front_pressure : m_rear_pressure;
-
-  // Calculate deviation from reference pressure
-  int _alert = 0;
-  float deviation = _pressure - reference_pressure;
-  float abs_deviation = std::abs(deviation);
-
-  if (_lowbatt) 
+  if (m_tpms_temp_enable)
     {
-    _alert = 1;
-    MyNotify.NotifyStringf("alert", "tpms.lowbatt", "TPMS low battery on wheel %d", indexcar + 1);
+    StdMetrics.ms_v_tpms_temp->SetValue(tpms_temp);
     }
-  else if (_missing_tx) 
+    
+  if (m_tpms_alert_enable)
     {
-    _alert = 2;
-    MyNotify.NotifyStringf("alert", "tpms.missing_tx", "TPMS missing transmission on wheel %d", indexcar + 1);
+    StdMetrics.ms_v_tpms_alert->SetValue(tpms_alert);
     }
-  else if (abs_deviation > m_pressure_alert) 
-    {
-    _alert = 2;
-    }
-  else if 
-    (abs_deviation > m_pressure_warning) 
-    {
-    _alert = 1;
-    }
-
-  StdMetrics.ms_v_tpms_alert->SetElemValue(indexcar, _alert);
-}
-
-// Set TPMS value at boot, cached values are not available
-// and we need to set dummy values to avoid alert messages
-void OvmsVehicleSmartEQ::setTPMSValueBoot() {
-  for (int i = 0; i < 4; i++) {
-    StdMetrics.ms_v_tpms_pressure->SetElemValue(i, 0.0f);
-    StdMetrics.ms_v_tpms_temp->SetElemValue(i, 0.0f);
-    StdMetrics.ms_v_tpms_alert->SetElemValue(i, 0);
-  }
 }
 
 void OvmsVehicleSmartEQ::DisablePlugin(const char* plugin) {
@@ -145,7 +201,6 @@ void OvmsVehicleSmartEQ::ResetChargingValues() {
   m_charge_finished = false;
   m_notifySOClimit = false;
   StdMetrics.ms_v_charge_kwh->SetValue(0); // charged Energy
-  //StdMetrics.ms_v_charge_kwh_grid->SetValue(0);
 }
 
 void OvmsVehicleSmartEQ::ResetTripCounters() {
@@ -155,6 +210,8 @@ void OvmsVehicleSmartEQ::ResetTripCounters() {
   }
   StdMetrics.ms_v_bat_energy_recd->SetValue(0);
   StdMetrics.ms_v_bat_energy_used->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_recd->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_used->SetValue(0);
   mt_pos_odometer_start->SetValue(StdMetrics.ms_v_pos_odometer->AsFloat());
   StdMetrics.ms_v_pos_trip->SetValue(0);
   StdMetrics.ms_v_charge_kwh_grid->SetValue(0);
@@ -167,127 +224,18 @@ void OvmsVehicleSmartEQ::ResetTotalCounters() {
   }
   StdMetrics.ms_v_bat_energy_recd_total->SetValue(0);
   StdMetrics.ms_v_bat_energy_used_total->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_recd_total->SetValue(0);
+  StdMetrics.ms_v_bat_coulomb_used_total->SetValue(0);
   mt_pos_odometer_trip_total->SetValue(0);
   mt_pos_odometer_start_total->SetValue(StdMetrics.ms_v_pos_odometer->AsFloat());
   StdMetrics.ms_v_charge_kwh_grid_total->SetValue(0);
-  MyConfig.SetParamValueBool("xsq", "resettotal", false);
-}
-
-// Task to check the time periodically
-void OvmsVehicleSmartEQ::TimeCheckTask() {
-  time_t now;
-  struct tm timeinfo;
-  time(&now);
-  localtime_r(&now, &timeinfo);
-
-  // Check if the current time is the climate time
-  if (timeinfo.tm_hour == mt_climate_h->AsInt() && timeinfo.tm_min == mt_climate_m->AsInt() && mt_climate_on->AsBool() && !StdMetrics.ms_v_env_hvac->AsBool()) 
-    {
-    CommandHomelink(mt_climate_1to3->AsInt());
-    }
-
-  // Check if the current day is within the climate days range
-  int current_day = timeinfo.tm_wday;
-  
-  if (current_day == mt_climate_ds->AsInt() && mt_climate_weekly->AsBool() && !m_climate_start_day) 
-    {
-    m_climate_start_day = true;
-    mt_climate_on->SetValue(true);
-    }
-  if (current_day == mt_climate_de->AsInt() && mt_climate_weekly->AsBool() && m_climate_start_day) 
-    {
-    m_climate_start_day = false;
-    mt_climate_on->SetValue(false);
-    }
-  if ((!mt_climate_weekly->AsBool() || !mt_climate_on->AsBool()) && m_climate_start_day) 
-    {
-    m_climate_start_day = false;
-    }
-}
-
-void OvmsVehicleSmartEQ::TimeBasedClimateData() {
-  std::string _oldtime = mt_climate_time->AsString();
-  std::string _newdata = mt_climate_data->AsString();
-  std::vector<int> _data;
-  std::stringstream _ss(_newdata);
-  std::string _item, _climate_on, _climate_weekly, _climate_time;
-  int _climate_ds, _climate_de, _climate_h, _climate_m;
-
-  while (std::getline(_ss, _item, ',')) 
-    {
-    _data.push_back(atoi(_item.c_str()));
-    }
-
-  // Need at least 7 fields: [trigger,on,weekly,time,ds,de,btn]
-  if (_data.size() < 7) 
-    {
-    ESP_LOGE(TAG, "Invalid climate data payload, need 7 ints, got %u", (unsigned)_data.size());
-    mt_climate_data->SetValue("0,0,0,0,-1,-1,-1");             // reset the data
-    return;
-    }
-
-  if(_data[0]>0 || m_climate_init) 
-  {
-    m_climate_init = false;
-    mt_climate_data->SetValue("0,0,0,0,-1,-1,-1");              // reset the data
-    _climate_on = _data[1] == 1 ? "yes" : "no";
-    _climate_weekly = _data[2] == 1 ? "yes" : "no";
-    if(_data[1]>0) { mt_climate_on->SetValue(_data[1] == 1);}
-    if(_data[2]>0) { mt_climate_weekly->SetValue(_data[2] == 1);}
-    if(_data[4]>-1) { _climate_ds = _data[4] > 6 ? 0 : _data[4]; mt_climate_ds->SetValue(_climate_ds);}
-    if(_data[5]>-1) { _climate_de = _data[5] <= 5 ? _data[5]+1 : 0; mt_climate_de->SetValue(_climate_de);}
-    if(_data[6]>-1) { mt_climate_1to3->SetValue(_data[6]);}
-
-    if(_data[3]>0) 
-      { 
-      if (_data[3] > 2359 || (_data[3] % 100) > 59) 
-        {
-        ESP_LOGE(TAG,"Invalid HHMM time %d", _data[3]);
-        return;
-        } 
-      else 
-        {
-        _climate_h = (_data[3] / 100) % 24;                      // Extract hours and ensure 24h format
-        _climate_m = _data[3] % 100;                             // Extract minutes
-        
-        if(_climate_m >= 60) 
-          {                                   // Handle invalid minutes
-            _climate_h = (_climate_h + _climate_m / 60) % 24;
-            _climate_m = _climate_m % 60;
-          }
-
-        if (_data[3] >= 0 && _data[3] <= 2359)
-          {
-          std::ostringstream oss;
-          oss << std::setfill('0') << std::setw(4) << _data[3];
-          mt_climate_time->SetValue(oss.str());
-          } 
-        else 
-          {
-          ESP_LOGE(TAG, "Invalid time value: %d", _data[3]);
-          return;
-          }
-
-        mt_climate_h->SetValue(_climate_h);
-        mt_climate_m->SetValue(_climate_m);
-        }
-      } 
-    else    
-      {
-      mt_climate_time->SetValue(_oldtime);    
-      }     
-    
-    // booster;no;no;0515;1;6;0
-    char buf[64];
-    snprintf(buf, sizeof(buf), "booster,%s,%s,%s,%d,%d,%d", _climate_on.c_str(), _climate_weekly.c_str(), mt_climate_time->AsString().c_str(), mt_climate_ds->AsInt(), mt_climate_de->AsInt(), mt_climate_1to3->AsInt());
-    StdMetrics.ms_v_gen_mode->SetValue(std::string(buf));
-    StdMetrics.ms_v_gen_current->SetValue(3);
-    if(MyConfig.GetParamValueBool("xsq", "climate.notify",false)) NotifyClimateTimer();
-    }
+  if (m_resettotal)
+    MyConfig.SetParamValueBool("xsq", "resettotal", false);
 }
 
 // check the 12V alert periodically and charge the 12V battery if needed
 void OvmsVehicleSmartEQ::Check12vState() {
+  OvmsVehicle::vehicle_command_t res = NotImplemented;
   static const float MIN_VOLTAGE = 10.0f;
   static const int ALERT_THRESHOLD_TICKS = 10;
   
@@ -297,95 +245,129 @@ void OvmsVehicleSmartEQ::Check12vState() {
   float volt = StdMetrics.ms_v_bat_12v_voltage->AsFloat();
   
   // Validate and update reference voltage
-  if (mref > dref) {
-      ESP_LOGI(TAG, "Adjusting 12V reference voltage from %.1fV to %.1fV", mref, dref);
-      StdMetrics.ms_v_bat_12v_voltage_ref->SetValue(dref);
-  }
+  if (mref > dref) 
+    {
+    ESP_LOGI(TAG, "Adjusting 12V reference voltage from %.1fV to %.1fV", mref, dref);
+    StdMetrics.ms_v_bat_12v_voltage_ref->SetValue(dref);
+    }
   
   // Handle alert conditions
-  if (alert_on && (volt > MIN_VOLTAGE)) {
-      m_12v_ticker++;
-      ESP_LOGI(TAG, "12V alert active for %d ticks, voltage: %.1fV", m_12v_ticker, volt);
-      
-      if (m_12v_ticker > ALERT_THRESHOLD_TICKS) {
-          m_12v_ticker = 0;
-          ESP_LOGI(TAG, "Initiating climate control due to 12V alert");
-          m_12v_charge_state = true;
-          m_climate_ticker = 3;
-          CommandClimateControl(true);
-          m_climate_ticker = 3;
+  if (alert_on && (volt > MIN_VOLTAGE)) 
+    {
+    m_12v_ticker++;
+    ESP_LOGI(TAG, "12V alert active for %d ticks, voltage: %.1fV", m_12v_ticker, volt);
+    
+    if (m_12v_ticker > ALERT_THRESHOLD_TICKS) 
+      {
+        m_12v_ticker = 0;
+        ESP_LOGI(TAG, "Initiating climate control due to 12V alert");
+        res = CommandClimateControl(true);
+
+      if (res == Success)
+        {
+        m_climate_restart = true;
+        m_climate_restart_ticker = 12; // 15 minutes
+        ESP_LOGI(TAG, "activated 12V charging successfully");
+        Notify12Vcharge();
+        }
+      else 
+        {
+        ESP_LOGE(TAG, "Failed to activate 12V charging");
+        }
       }
-  } else if (m_12v_ticker > 0) {
-      ESP_LOGI(TAG, "12V alert cleared, resetting ticker");
-      m_12v_ticker = 0;
-  }
+    } 
+  else if (m_12v_ticker > 0) 
+    {
+    ESP_LOGI(TAG, "12V alert cleared, resetting ticker");
+    m_12v_ticker = 0;
+    }
 }
 
 void OvmsVehicleSmartEQ::ReCalcADCfactor(float can12V, OvmsWriter* writer) {
   #ifdef CONFIG_OVMS_COMP_ADC
-    if (can12V < 10.0f || can12V > 15.0f) {
+    if (can12V < 12.0f || can12V > 15.0f) 
+      {
       ESP_LOGW(TAG, "Skip ADC factor recalculation (invalid 12V input %.2f)", can12V);
       if (writer) writer->printf("Skip ADC factor recalculation (invalid 12V input %.2f)\n", can12V);
       return;
-    }
+      }
+      
+    // Configure ADC
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11);
+    uint16_t samples_adc[m_adc_samples];
+    
+    // Collect samples
+    for (int i = 0; i < m_adc_samples; i++) 
+      {
+      vTaskDelay(2 / portTICK_PERIOD_MS);
+      samples_adc[i] = adc1_get_raw(ADC1_CHANNEL_0);
+      }
 
-    const int NUM_SAMPLES = MyConfig.GetParamValueInt("xsq", "calc.adcfactor.samples", 6);
-    uint16_t samples[NUM_SAMPLES];
-    
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-      vTaskDelay(100 / portTICK_PERIOD_MS);
-      samples[i] = adc1_get_raw(ADC1_CHANNEL_0);
-    }
-    
-    for (int i = 0; i < NUM_SAMPLES - 1; i++) {
-      for (int j = 0; j < NUM_SAMPLES - i - 1; j++) {
-        if (samples[j] > samples[j + 1]) {
-          uint16_t temp = samples[j];
-          samples[j] = samples[j + 1];
-          samples[j + 1] = temp;
+    // Bubble sort for median calculation
+    for (int i = 0; i < m_adc_samples - 1; i++) 
+      {
+      for (int j = 0; j < m_adc_samples - i - 1; j++) 
+        {
+        if (samples_adc[j] > samples_adc[j + 1]) 
+          {
+          uint16_t temp = samples_adc[j];
+          samples_adc[j] = samples_adc[j + 1];
+          samples_adc[j + 1] = temp;
+          }
         }
       }
-    }
 
-    float median_raw = (samples[(NUM_SAMPLES / 2) - 1] + samples[NUM_SAMPLES / 2]) / 2.0f;
+    // Calculate median
+    float median_raw;
+    if (m_adc_samples % 2 == 0) 
+      {
+      median_raw = (samples_adc[(m_adc_samples / 2) - 1] + samples_adc[m_adc_samples / 2]) / 2.0f;
+      } 
+      else 
+      {
+      median_raw = samples_adc[m_adc_samples / 2];
+      }
 
-    // Optional: Auch Mittelwert berechnen für Vergleich
+    // Calculate average of ADC samples
     uint32_t summid = 0;
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-      summid += samples[i];
-    }
-    float avg_raw = summid / (float)NUM_SAMPLES;
+    for (int i = 0; i < m_adc_samples; i++) 
+      {
+      summid += samples_adc[i];
+      }
+    float avg_raw = summid / (float)m_adc_samples;    
 
-    // Nach dem Sammeln der Samples, sortiere nicht, sondern:
-    uint16_t min_val = samples[0];          // Kleinster Wert (nach Sortierung)
-    uint16_t max_val = samples[NUM_SAMPLES - 1];  // Größter Wert (nach Sortierung)
-    // Trimmed Mean: Entferne Min + Max
-    float trimmed_avg = (summid - min_val - max_val) / (float)(NUM_SAMPLES - 2);
+    // After collecting samples, don't sort, instead:
+    uint16_t min_val = samples_adc[0];          // Smallest value (after sorting)
+    uint16_t max_val = samples_adc[m_adc_samples - 1];  // Largest value (after sorting)
+    // Trimmed Mean: Remove Min + Max
+    float trimmed_avg = (summid - min_val - max_val) / (float)(m_adc_samples - 2);
     
+    // Calculate average of USM voltage samples
     float V_batt = can12V;
-    float adc_factor_median = (V_batt > 0) ? (median_raw / V_batt) : 0;
-    float adc_factor_avg = (V_batt > 0) ? (avg_raw / V_batt) : 0;
-    float adc_factor_trimmed = (V_batt > 0) ? (trimmed_avg / V_batt) : 0;
+
+    float adc_factor_median = (V_batt > 12.0f) ? (median_raw / V_batt) : 0.0f;
+    float adc_factor_avg = (V_batt > 12.0f) ? (avg_raw / V_batt) : 0.0f;
+    float adc_factor_trimmed = (V_batt > 12.0f) ? (trimmed_avg / V_batt) : 0.0f;
 
     float adc_factor_new = adc_factor_median;
     float adc_factor_prev = MyConfig.GetParamValueFloat("system.adc", "factor12v", 195.7f);
 
-   if (writer) {
+    if (writer) 
+      {
       writer->printf("ADC samples (sorted): min=%u max=%u median=%.2f avg=%.2f trimmed=%.2f\n",
-                     min_val, max_val, median_raw, avg_raw, trimmed_avg);
+                      min_val, max_val, median_raw, avg_raw, trimmed_avg);
       writer->printf("     factor_median=%.3f factor_avg=%.3f factor_trimmed=%.3f\n",
-                     adc_factor_median, adc_factor_avg, adc_factor_trimmed);
-    }
+                      adc_factor_median, adc_factor_avg, adc_factor_trimmed);
+      }
 
     if (writer) writer->printf("ADC recalculation: avg_raw=%.2f  V_batt=%.3f  factor=%.3f\n", avg_raw, V_batt, adc_factor_new);
-    if (adc_factor_new < 160.0f || adc_factor_new > 230.0f) {
+    if (adc_factor_new < 180.0f || adc_factor_new > 210.0f) 
+      {
       if (writer) writer->printf("Reject ADC factor %.3f (out of bounds, keeping %.3f)\n", adc_factor_new, adc_factor_prev);
       return;
-    }   
+      }    
     
-
     m_adc_factor_history.push_back(adc_factor_prev);
     if (m_adc_factor_history.size() > 10)
       m_adc_factor_history.pop_front();
@@ -397,6 +379,7 @@ void OvmsVehicleSmartEQ::ReCalcADCfactor(float can12V, OvmsWriter* writer) {
       mt_adc_factor_history->SetElemValues(0, n, hist);
     mt_adc_factor->SetValue(adc_factor_new);
     MyConfig.SetParamValueFloat("system.adc", "factor12v", adc_factor_new);
+    MyConfig.SetParamValueBool("xsq", "calc.adcfactor", false);
     if (writer) writer->printf("New ADC factor stored: %.3f (prev %.3f, history size %u)\n", adc_factor_new, adc_factor_prev, (unsigned)n);
   #else
     ESP_LOGD(TAG, "ADC support not enabled");
@@ -405,34 +388,38 @@ void OvmsVehicleSmartEQ::ReCalcADCfactor(float can12V, OvmsWriter* writer) {
 }
 
 void OvmsVehicleSmartEQ::DoorLockState() {
-  bool warning_unlocked = (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs &&
-                          !StdMetrics.ms_v_env_on->AsBool() &&
-                          !StdMetrics.ms_v_env_locked->AsBool() &&
+  bool warning_unlocked = (StdMetrics.ms_v_env_parktime->AsInt(0) > m_park_timeout_secs &&
+                          !IsOnEQ() &&
+                          !StdMetrics.ms_v_env_locked->AsBool(false) &&
+                          !m_cmd_locked &&
                           !m_warning_unlocked);
   
   if (warning_unlocked) {
       m_warning_unlocked = true;
       ESP_LOGI(TAG, "Warning: Vehicle is unlocked and parked for more than 10 minutes");
       MyNotify.NotifyString("alert", "vehicle.unlocked", "The vehicle is unlocked and parked for more than 10 minutes.");
-  } else if (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs +10 && !warning_unlocked){
+  } else if (StdMetrics.ms_v_env_parktime->AsInt(0) > m_park_timeout_secs +10 && !warning_unlocked){
       m_warning_unlocked = true; // prevent warning if the vehicle is parked locked for more than 10 minutes
   }
 }
 
+bool OvmsVehicleSmartEQ::DoorOpen() {
+  return (StdMetrics.ms_v_door_fl->AsBool(false) ||
+          StdMetrics.ms_v_door_fr->AsBool(false) ||
+          StdMetrics.ms_v_door_rl->AsBool(false) ||
+          StdMetrics.ms_v_door_rr->AsBool(false) ||
+          StdMetrics.ms_v_door_trunk->AsBool(false) ||
+          StdMetrics.ms_v_door_hood->AsBool(false));
+}
+
 void OvmsVehicleSmartEQ::DoorOpenState() {
-  bool open_doors = (StdMetrics.ms_v_door_fl->AsBool() ||
-                     StdMetrics.ms_v_door_fr->AsBool() ||
-                     StdMetrics.ms_v_door_rl->AsBool() ||
-                     StdMetrics.ms_v_door_rr->AsBool() ||
-                     StdMetrics.ms_v_door_trunk->AsBool() ||
-                     StdMetrics.ms_v_door_hood->AsBool()) &&
-                     !m_warning_dooropen;
+  bool open_doors = !m_warning_dooropen && DoorOpen();
 
   if (open_doors) {
       m_warning_dooropen = true;
       ESP_LOGI(TAG, "Warning: Vehicle has open doors");
       MyNotify.NotifyString("alert", "vehicle.open_doors", "The vehicle has open doors.");
-  } else if (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs +10 && !open_doors){
+  } else if (StdMetrics.ms_v_env_parktime->AsInt() > m_park_timeout_secs +10 && !DoorOpen()){
       m_warning_dooropen = true; // prevent warning if the vehicle is parked locked for more than 10 minutes
   }
 }
@@ -466,14 +453,158 @@ void OvmsVehicleSmartEQ::ModemRestart() {
   #endif
 }
 
-void OvmsVehicleSmartEQ::ModemEventRestart(std::string event, void* data) {
-  if (!m_modem_check) {
-    // ESP_LOGE(TAG, "Modem auto restart is disabled");
-    return;
-  }
+void OvmsVehicleSmartEQ::smartOn()
+{
+  // Reset trip values
+  if (!m_resettrip)
+    ResetTripCounters();
+  // Reset kWh/100km values
+  if (m_resettotal)
+    ResetTotalCounters();
+  // Reset warning flags
+  m_warning_unlocked = false;
+  m_warning_dooropen = false;
+  // Reset 12V and climate control tickers
+  m_12v_ticker = 0;
+  m_climate_restart = false;
+  m_climate_restart_ticker = 0;
+  // reset idle ticker when vehicle turned on to prevent trigger every 60 sec.
+  m_idle_ticker = 15 * 60;
+  // canwrite enable write access, only when car is on
+  if(IsCANwrite()) 
+    {
+    smartCANmode(true);
+    }
+  ESP_LOGD(TAG, "smartOn()");
+}
 
-  ModemRestart();
-  ESP_LOGI(TAG, "Modem event '%s' triggered a modem restart", event.c_str());
+void OvmsVehicleSmartEQ::smartOff()
+{
+  // Reset gear
+  StdMetrics.ms_v_env_gear->SetValue(0);
+}
+
+void OvmsVehicleSmartEQ::smartAwake()
+{
+  // enable active polling when car wakes up (canwrite only)
+  mt_bus_awake->SetValue(true);
+  if(m_enable_write) 
+    {
+    smartCANmode(true);
+    }
+  else if (m_enable_write_caron && m_can_active)
+    {
+    smartCANmode(false);
+    }
+}
+
+void OvmsVehicleSmartEQ::smartSleep()
+{
+  // disable active polling when car goes to sleep
+  if((m_enable_write_caron && m_can_active) || m_enable_write_sleep)
+    smartCANmode(false);
+  ESP_LOGD(TAG, "smartSleep()");
+}
+
+void OvmsVehicleSmartEQ::smartChargeStart()
+{
+  if (m_charge_finished) ResetChargingValues();
+  if (m_resettrip) ResetTripCounters();
+  // Set charging metrics
+  StdMetrics.ms_v_charge_pilot->SetValue(true);
+  StdMetrics.ms_v_charge_mode->SetValue("standard");
+  StdMetrics.ms_v_charge_type->SetValue("type2");
+  StdMetrics.ms_v_charge_state->SetValue("charging");
+  StdMetrics.ms_v_charge_substate->SetValue("onrequest");
+  StdMetrics.ms_v_charge_timestamp->SetValue(StdMetrics.ms_m_timeutc->AsInt());
+  mt_bus_awake->SetValue(true);
+  // trigger ADC factor recalculation when HV charging started
+  if(m_enable_calcADCfactor && !m_ADCfactor_recalc) 
+    {
+    m_ADCfactor_recalc_timer = 2;   // wait at least 2 min. before recalculation
+    m_ADCfactor_recalc = true;      // recalculate ADC factor when HV charging
+    }
+  // canwrite enable write access, only when car is on
+  if(IsCANwrite()) 
+    {
+    m_poll_on_charge = true;
+    smartCANmode(true);
+    }
+  ESP_LOGD(TAG, "smartChargeStart()");
+}
+
+void OvmsVehicleSmartEQ::smartChargeStop()
+{
+  StdMetrics.ms_v_charge_pilot->SetValue(false);
+  StdMetrics.ms_v_charge_mode->SetValue("standard");
+  StdMetrics.ms_v_charge_type->SetValue("type2");
+  StdMetrics.ms_v_charge_duration_full->SetValue(0);
+  StdMetrics.ms_v_charge_duration_soc->SetValue(0);
+  StdMetrics.ms_v_charge_duration_range->SetValue(0);
+  StdMetrics.ms_v_charge_power->SetValue(0);
+  StdMetrics.ms_v_charge_current->SetValue(0);
+  StdMetrics.ms_v_charge_timestamp->SetValue(StdMetrics.ms_m_timeutc->AsInt());
+
+  if (StdMetrics.ms_v_bat_soc->AsInt() < 95) {
+    // Assume the charge was interrupted
+    ESP_LOGI(TAG,"charge session was interrupted");
+    StdMetrics.ms_v_charge_state->SetValue("stopped");
+    StdMetrics.ms_v_charge_substate->SetValue("interrupted");
+  } else {
+    // Assume the charge completed normally
+    ESP_LOGI(TAG,"charge session completed");
+    StdMetrics.ms_v_charge_state->SetValue("done");
+    StdMetrics.ms_v_charge_substate->SetValue("onrequest");
+  }
+  // stop recalculation when HV charging stopped
+  m_ADCfactor_recalc_timer = 2;
+  m_ADCfactor_recalc = false;
+  ESP_LOGD(TAG, "smartChargeStop()");
+}
+
+void OvmsVehicleSmartEQ::smartChargePrepare()
+{
+  ESP_LOGD(TAG, "smartChargePrepare()");
+}
+
+void OvmsVehicleSmartEQ::smartChargeFinish()
+{
+  m_charge_finished = true;
+  m_poll_on_charge = false;
+  StdMetrics.ms_v_charge_power->SetValue(0);
+  ESP_LOGD(TAG, "smartChargeFinish()");
+}
+
+void OvmsVehicleSmartEQ::smartCANmode(bool activate)
+{
+  if(!IsCANwrite())
+    {
+    m_can1->Stop();
+    vTaskDelay(200 / portTICK_PERIOD_MS);
+    m_can1->Start(CAN_MODE_LISTEN, CAN_SPEED_500KBPS);
+    PollSetPidList(m_can1, NULL);
+    m_can_active = false;
+    m_poll_on_charge = false;
+    ESP_LOGD(TAG, "smartCANmode(): CAN bus switched to listen mode");
+    return;
+    }
+  
+  // switch CAN bus to active/listen mode
+  m_can1->Stop();
+  vTaskDelay(200 / portTICK_PERIOD_MS);
+  CAN_mode_t mode = activate ? CAN_MODE_ACTIVE : CAN_MODE_LISTEN;
+  RegisterCanBus(1, mode, CAN_SPEED_500KBPS);
+  m_can_active = activate;
+  m_poll_on_charge = m_poll_state == POLLSTATE_CHARGING ? true : false;
+  if (activate)
+    {
+    ESP_LOGD(TAG, "smartCANmode(): CAN bus switched to active mode for write access");
+    }
+  if (!activate)
+    {
+    ESP_LOGD(TAG, "smartCANmode(): CAN bus switched to listen mode");
+    }
+  HandleOBDpolling();
 }
 
 /**
@@ -505,36 +636,25 @@ bool OvmsVehicleSmartEQ::SetFeature(int key, const char *value)
     case 4:
     {
       int bits = atoi(value);
-      char buf[10];
-      sprintf(buf, "1,%d,0,0,-1,-1,-1", bits);
-      mt_climate_data->SetValue(std::string(buf));
+      MyConfig.SetParamValueBool("xsq", "resettotal",  (bits& 1)!=0);
       return true;
     }
     case 5:
     {
       int bits = atoi(value);
-      if(bits < 0) bits = 0;
-      if(bits > 2359) bits = 0;
-      
-      char buf[4];
-      snprintf(buf, sizeof(buf), "1,1,0,%04d,-1,-1,-1", bits);
-      mt_climate_data->SetValue(std::string(buf));
+      MyConfig.SetParamValueBool("xsq", "12v.charge",  (bits& 1)!=0);
       return true;
-    }
+    }  
     case 6:
     {
       int bits = atoi(value);
-      if(bits < 0) bits = 0;
-      if(bits > 2) bits = 2;
-      char buf[64];
-      snprintf(buf, sizeof(buf), "1,0,0,0,-1,-1,%d", bits);
-      mt_climate_data->SetValue(std::string(buf));
+      MyConfig.SetParamValueBool("xsq", "unlock.warning",  (bits& 1)!=0);
       return true;
     }
     case 7:
     {
       int bits = atoi(value);
-      MyConfig.SetParamValueBool("xsq", "resettotal",  (bits& 1)!=0);
+      MyConfig.SetParamValueBool("xsq", "door.warning",  (bits& 1)!=0);
       return true;
     }
     // case 8 -> Vehicle.cpp GPS stream
@@ -546,7 +666,8 @@ bool OvmsVehicleSmartEQ::SetFeature(int key, const char *value)
     }
     case 11:
     {
-      MyConfig.SetParamValue("xsq", "suffrange", value);
+      int bits = atoi(value);
+      MyConfig.SetParamValueBool("xsq", "calc.adcfactor",  (bits& 1)!=0);
       return true;
     }
     case 12:
@@ -567,12 +688,6 @@ bool OvmsVehicleSmartEQ::SetFeature(int key, const char *value)
       MyConfig.SetParamValueBool("xsq", "canwrite",  (bits& 1)!=0);
       return true;
     }
-    case 16:
-    {
-      int bits = atoi(value);
-      MyConfig.SetParamValueBool("xsq", "unlock.warning",  (bits& 1)!=0);
-      return true;
-    }
     default:
       return OvmsVehicle::SetFeature(key, value);
   }
@@ -588,41 +703,49 @@ const std::string OvmsVehicleSmartEQ::GetFeature(int key)
   {
     case 1:
     {
-      int bits = ( MyConfig.GetParamValueBool("xsq", "led",  false) ?  1 : 0);
+      int bits = m_enable_LED_state ?  1 : 0;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
     }
     case 2:
     {
-      int bits = ( MyConfig.GetParamValueBool("xsq", "tpms.temp",  false) ?  1 : 0);
+      int bits = m_tpms_temp_enable ?  1 : 0;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
     }
     case 3:
     {
-      int bits = ( MyConfig.GetParamValueBool("xsq", "resettrip",  false) ?  1 : 0);
+      int bits = m_resettrip ?  1 : 0;
+      char buf[4];
+      sprintf(buf, "%d", bits);
+      return std::string(buf);
+    }    
+    case 4:
+    {
+      int bits = m_resettotal?  1 : 0;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
     }
-    case 4:
-      if(mt_climate_on->AsBool()){return std::string("1");}else{ return std::string("2");};
     case 5:
     {
-      return mt_climate_time->AsString();
-    }
+      int bits = m_12v_charge ?  1 : 0;
+      char buf[4];
+      sprintf(buf, "%d", bits);
+      return std::string(buf);
+    }   
     case 6:
     {
-      int bits = mt_climate_1to3->AsInt();
+      int bits = m_enable_lock_state ?  1 : 0;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
     }
     case 7:
     {
-      int bits = ( MyConfig.GetParamValueBool("xsq", "resettotal",  false) ?  1 : 0);
+      int bits = m_enable_door_state ?  1 : 0;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
@@ -630,29 +753,37 @@ const std::string OvmsVehicleSmartEQ::GetFeature(int key)
     // case 8 -> Vehicle.cpp stream
     // case 9 -> Vehicle.cpp minsoc
     case 10:
-      return MyConfig.GetParamValue("xsq", "suffsoc", STR(0));
+    {
+      int bits = m_suffsoc;
+      char buf[4];
+      sprintf(buf, "%d", bits);
+      return std::string(buf);
+    }
     case 11:
-      return MyConfig.GetParamValue("xsq", "suffrange", STR(0));
+    {
+      int bits = m_enable_calcADCfactor ?  1 : 0;
+      char buf[4];
+      sprintf(buf, "%d", bits);
+      return std::string(buf);
+    }
     case 12:
     {
-      int bits = ( MyConfig.GetParamValueBool("xsq", "bcvalue",  false) ?  1 : 0);
+      int bits = m_bcvalue ?  1 : 0;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
     }
     case 13:
-      return MyConfig.GetParamValue("xsq", "full.km", STR(126.0));
-    // case 14 -> Vehicle.cpp carbits
-    case 15:
     {
-      int bits = ( MyConfig.GetParamValueBool("xsq", "canwrite",  false) ?  1 : 0);
+      int bits = m_full_km;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
     }
-    case 16:
+    // case 14 -> Vehicle.cpp carbits
+    case 15:
     {
-      int bits = ( MyConfig.GetParamValueBool("xsq", "unlock.warning",  true) ?  1 : 0);
+      int bits = m_enable_write ?  1 : 0;
       char buf[4];
       sprintf(buf, "%d", bits);
       return std::string(buf);
