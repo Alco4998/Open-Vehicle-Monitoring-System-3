@@ -124,8 +124,17 @@ class OvmsVehicleKiaNiroEv : public KiaVehicle
     bool IsKona();
     bool IsLHD();
     metric_unit_t GetConsoleUnits();
+    bool PollRequestVIN();
 
     bool  kn_emergency_message_sent;
+
+    int m_checklock_retry, m_checklock_start, m_checklock_notify;
+    bool m_aux_is_charging, m_aux_is_low;
+
+    // Detecting of continuous charging of AUX battery.
+    // Tries to not rock the boat by turning on the ICU unnecessarily.
+    const uint16_t AUX_CRIT_THRESH = 1440; // 14.4v
+    average_asym_util_t<uint32_t, 128, 32>  m_crit_check_avg;
 
   protected:
     void HandleCharging();
@@ -156,6 +165,7 @@ class OvmsVehicleKiaNiroEv : public KiaVehicle
     void StopTesterPresentMessages();
 
     OvmsCommand *cmd_xkn;
+    int m_vin_retry;
 
 		#define CFG_DEFAULT_MAXRANGE 440
     int kn_maxrange = CFG_DEFAULT_MAXRANGE;        // Configured max range at 20 °C
@@ -205,6 +215,23 @@ class OvmsVehicleKiaNiroEv : public KiaVehicle
     RangeCalculator *kn_range_calc;
 
     int16_t xkn_keep_awake;
+    inline int PollGetState()
+  {
+    return m_poll_state;
+  }
+  inline void PollState_Off()
+  {
+    PollSetState(0);
+  }
+  inline bool IsPollState_Off()
+  {
+    return m_poll_state == 0;
+  }
+
+  inline void PollState_Running()
+  {
+    PollSetState(1);
+  }
     inline void PollState_Ping() { PollSetState(3); }
     inline void PollState_Ping(uint32_t ticks)
     {

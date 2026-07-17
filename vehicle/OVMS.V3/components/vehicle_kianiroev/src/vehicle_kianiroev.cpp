@@ -75,6 +75,11 @@
 
 static const char *TAG = "v-kianiroev";
 
+#ifdef bind
+#undef bind
+#endif
+using namespace std::placeholders;
+
 // Pollstate 0 - car is off
 // Pollstate 1 - car is on
 // Pollstate 2 - car is charging
@@ -82,22 +87,22 @@ static const OvmsPoller::poll_pid_t vehicle_kianiroev_polls[] =
 { //															Off  ON	 CHRG  Ping
 		{ 0x7e2, 0x7ea, VEHICLE_POLL_TYPE_OBDII_1A,		 0x80,   { 0, 120, 120, 0}, 0, ISOTP_STD },  // VMCU - VIN
 
-		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0101, { 0, 9,  9, 9}, 0, ISOTP_STD }, 	// BMC Diag page 01 - Must be called when off to detect when charging
+		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0101, { 0, 9,  9, 4}, 0, ISOTP_STD }, 	// BMC Diag page 01 - Must be called when off to detect when charging
 		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0102, { 0, 59, 9, 0}, 0, ISOTP_STD }, 	// BMC Diag page 02
 		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0103, { 0, 59, 9, 0}, 0, ISOTP_STD }, 	// BMC Diag page 03
 		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0104, { 0, 59, 9, 0}, 0, ISOTP_STD }, 	// BMC Diag page 04
-		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0105, { 0, 59, 9, 0}, 0, ISOTP_STD },		// BMC Diag page 05
-		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0106, { 0, 9,  9, 0}, 0, ISOTP_STD },		// BMC Diag page 06
+		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0105, { 0, 59, 9, 0}, 0, ISOTP_STD },	// BMC Diag page 05
+		{ 0x7e4, 0x7ec, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0106, { 0, 9,  9, 0}, 0, ISOTP_STD },	// BMC Diag page 06
 
 	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB003, { 0, 29, 29, 0}, 0, ISOTP_STD },    // BCM ???
-	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB004, { 0, 29, 29 }, 0, ISOTP_STD },    // BCM ???
-	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB005, { 0, 29, 29 }, 0, ISOTP_STD },    // BCM ???
-	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB006, { 0, 29, 29 }, 0, ISOTP_STD },    // BCM ???
-	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB007, { 0, 29, 29 }, 0, ISOTP_STD },    // BCM ???
-	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB008, { 0, 29, 29 }, 0, ISOTP_STD },    // BCM ???
-	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB00A, { 0, 29, 29 }, 0, ISOTP_STD },    // BCM ???
+	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB004, { 0, 29, 29  0}, 0, ISOTP_STD },    // BCM ???
+	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB005, { 0, 29, 29  0}, 0, ISOTP_STD },    // BCM ???
+	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB006, { 0, 29, 29  0}, 0, ISOTP_STD },    // BCM ???
+	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB007, { 0, 29, 29  0}, 0, ISOTP_STD },    // BCM ???
+	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB008, { 0, 29, 29  0}, 0, ISOTP_STD },    // BCM ???
+	//	{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB00A, { 0, 29, 29  0}, 0, ISOTP_STD },    // BCM ???
 		{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB00C, { 0, 29, 29, 0}, 0, ISOTP_STD },    // BCM Heated handle
-	//  { 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB00D, { 0, 10, 10 }, 0, ISOTP_STD },    // BCM ???
+	//  { 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB00D, { 0, 10, 10  0}, 0, ISOTP_STD },    // BCM ???
 		{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB00E, { 0, 10, 10, 0}, 0, ISOTP_STD },    // BCM Chargeport ++
 
 		{ 0x7a0, 0x7a8, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xC002, { 0, 60, 0, 0}, 0, ISOTP_STD }, 	// TMPS - ID's
@@ -105,29 +110,29 @@ static const OvmsPoller::poll_pid_t vehicle_kianiroev_polls[] =
 
 	//	{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc01, { 7, 7,  7 , 0}, 0, ISOTP_STD },   // Unknown
 	//	{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc02, { 7, 7,  7 , 0}, 0, ISOTP_STD },   // Unknown
-		{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc03, { 0, 7,  7 , 7}, 0, ISOTP_STD },   // IGMP Door status + IGN1 & IGN2 - Detects when car is turned on
-		{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc04, { 0, 11, 11, 0}, 0, ISOTP_STD },   // IGMP Door status
+		{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc03, { 0, 7,  7 , 2}, 0, ISOTP_STD },   // IGMP Door status + IGN1 & IGN2 - Detects when car is turned on
+		{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc04, { 0, 11, 11, 2}, 0, ISOTP_STD },   // IGMP Door status
 	//	{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc05, { 0, 0 , 0 , 0}, 0, ISOTP_STD },   // Unkonwn
 	//	{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc06, { 0, 0 , 0 , 0}, 0, ISOTP_STD },   // Unkonwn
 		{ 0x770, 0x778, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xbc07, { 0, 13, 13, 0}, 0, ISOTP_STD },   // IGMP Rear/mirror defogger
 
-		{ 0x7b3, 0x7bb, VEHICLE_POLL_TYPE_OBDIIEXTENDED,  	0x0100, 		{       0,   10,  10 }, 0, ISOTP_STD },  // AirCon
-		//{ 0x7b3, 0x7bb, VEHICLE_POLL_TYPE_OBDIIEXTENDED,  	0x0102, 		{       0,   10,  10 } },  // AirCon - No usable values found yet
-		{ 0x7c6, 0x7ce, VEHICLE_POLL_TYPE_OBDIIEXTENDED,  	0xA020, 		{       0,   19, 120 }, 0, ISOTP_STD },  // Cluster. ODO
-		{ 0x7c6, 0x7ce, VEHICLE_POLL_TYPE_OBDIIEXTENDED,  	0xB002, 		{       0,   19, 120 }, 0, ISOTP_STD },  // Cluster. ODO
+		{ 0x7b3, 0x7bb, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0100, { 0,   10,  10, 30}, 0, ISOTP_STD },  // AirCon
+	//  { 0x7b3, 0x7bb, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0102, { 0,   10,  10 } },  // AirCon - No usable values found yet
+		{ 0x7c6, 0x7ce, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xA020, { 0,   19, 120, 0}, 0, ISOTP_STD },  // Cluster. ODO
+		{ 0x7c6, 0x7ce, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB002, { 0,   19, 120, 0}, 0, ISOTP_STD },  // Cluster. ODO
 		{ 0x7b3, 0x7bb, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0100, { 0, 10, 10, 30}, 0, ISOTP_STD }, // AirCon
-	//  { 0x7b3, 0x7bb, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0102, { 0, 10, 10 }, 0, ISOTP_STD }, // AirCon - No usable values found yet
+	//  { 0x7b3, 0x7bb, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0x0102, { 0, 10, 10, 0}, 0, ISOTP_STD }, // AirCon - No usable values found yet
 
 		{ 0x7c6, 0x7ce, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xB002, { 0, 19, 120, 0}, 0, ISOTP_STD },  // Cluster. ODO
 
 		{ 0x7d1, 0x7d9, VEHICLE_POLL_TYPE_OBDIIEXTENDED, 0xc101, { 0, 27, 27, 0}, 0, ISOTP_STD },  // ABS/ESP - Emergency lights
 
 		{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x01, { 0, 58, 11, 0}, 0, ISOTP_STD },   // OBC - On board charger
-    //	{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x02, { 0, 0 , 0  }, 0, ISOTP_STD}, 	// OBC
+	//	{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x02, { 0, 0 , 0,  0}, 0, ISOTP_STD },   // OBC
 		{ 0x7e5, 0x7ed, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x03, { 0, 58, 11, 0}, 0, ISOTP_STD },   // OBC
 
-		{ 0x7e2, 0x7ea, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x01, { 0, 7, 19, 0}, 0, ISOTP_STD },   // VMCU - Shift position
-		{ 0x7e2, 0x7ea, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x02, { 0, 7, 7 , 0}, 0, ISOTP_STD },    // VMCU - Aux Battery data
+		{ 0x7e2, 0x7ea, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x01, { 0, 7, 19, 4}, 0, ISOTP_STD },   // VMCU - Shift position
+		{ 0x7e2, 0x7ea, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x02, { 0, 7, 7 , 4}, 0, ISOTP_STD },    // VMCU - Aux Battery data
 
 	//	{ 0x7e3, 0x7eb, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x01, { 0, 11, 11, 0}, 0, ISOTP_STD },   // MCU ???
 		{ 0x7e3, 0x7eb, VEHICLE_POLL_TYPE_OBDIIGROUP,    0x02, { 0, 11, 11, 0}, 0, ISOTP_STD },   // MCU
@@ -141,7 +146,7 @@ static const OvmsPoller::poll_pid_t vehicle_kianiroev_polls[] =
 charging_profile ioniq_charge_steps[] = {
 		//from%, to%, Chargespeed in Wh
        { 0,	 	0,     0 },
-	   { 0,		20,    35000},
+	   { 0,		20,    48000},
 	   { 20,	55,	   48000},
 	   { 55,	60,	   44000},
 	   { 60,	75,	   36000},
@@ -155,6 +160,7 @@ charging_profile ioniq_charge_steps[] = {
  * Constructor for Kia Niro EV
  */
 OvmsVehicleKiaNiroEv::OvmsVehicleKiaNiroEv()
+  : m_crit_check_avg(1100, 3) // So it doesn't spring up to block if the voltage is 15 when booting.
   {
   ESP_LOGI(TAG, "Kia Niro / Hyundai Kona EV v1.0 vehicle module");
 
@@ -319,9 +325,9 @@ OvmsVehicleKiaNiroEv::OvmsVehicleKiaNiroEv()
 
   POLLSTATE_OFF;
   kia_secs_with_no_client=0;
-  PollSetPidList(m_can1,vehicle_kianiroev_polls);
+  PollSetPidList(m_can1, vehicle_kianiroev_polls);
 
-  kn_range_calc = new RangeCalculator(5, 4, 300, 39);
+  kn_range_calc = new RangeCalculator(5, 1.5, 300, 39, 1);
   
   ESP_LOGD(TAG, "PollState->Ping for 30 (Init)");
   PollState_Ping(30);
@@ -691,8 +697,10 @@ void OvmsVehicleKiaNiroEv::ConfigChanged(OvmsConfigParam* param)
  * Ticker10: Called every ten seconds
  */
 void OvmsVehicleKiaNiroEv::Ticker10(uint32_t ticker)
-	{
-	}
+{
+  m_crit_check_avg.add(int(StdMetrics.ms_v_bat_12v_voltage->AsFloat()*100));
+}
+
 
 /**
  * Ticker300: Called every five minutes
@@ -880,72 +888,96 @@ uint16_t OvmsVehicleKiaNiroEv::calcMinutesRemaining(float target)
 
 void OvmsVehicleKiaNiroEv::NotifiedVehicleAux12vStateChanged(OvmsBatteryState new_state, const OvmsBatteryMon &monitor)
 {
- 	ESP_LOGD(TAG, "Aux Battery: %s", monitor.to_string().c_str());
-	switch (new_state)
-	{
-	case OvmsBatteryState::Unknown:
-		break;
+#ifdef OVMS_DEBUG_BATTERYMON
+  ESP_LOGV(TAG, "Aux Battery: %s", monitor.to_string().c_str());
+#endif
+  bool new_is_charging = false;
+  switch (new_state) {
+    case OvmsBatteryState::Charging:
+    case OvmsBatteryState::ChargingDip:
+    case OvmsBatteryState::ChargingBlip:
+      new_is_charging = true;
+      Atomic_Swap(m_aux_is_low, false);
+      break;
+    case OvmsBatteryState::Low:
+      Atomic_Swap(m_aux_is_low, true);
+      break;
+    default:
+      Atomic_Swap(m_aux_is_low, false);
+      break;
+  }
+  Atomic_Swap(m_aux_is_charging, new_is_charging);
+  StdMetrics.ms_v_env_charging12v->SetValue(new_is_charging);
 
-	case OvmsBatteryState::Normal:
-		ESP_LOGD(TAG, "Aux Battery State: Normal");
-		m_b_aux_soc->SetValue( CalcAUXSoc(monitor.average_lastf()), Percentage );
-		break;
+  switch (new_state) {
+    case OvmsBatteryState::Unknown:
+      break;
+    case OvmsBatteryState::Normal:
+      ESP_LOGD(TAG, "Aux Battery state returned to normal");
+      m_b_aux_soc->SetValue( CalcAUXSoc(monitor.average_lastf()), Percentage );
+      break;
+    case OvmsBatteryState::Charging:
+      ESP_LOGD(TAG, "Aux Battery state: Charging %g" , monitor.average_lastf());
+      break;
+    case OvmsBatteryState::ChargingDip:
 
-	case OvmsBatteryState::Charging:
-		ESP_LOGD(TAG, "Aux Battery State: Charging (%g)", monitor.average_lastf());
-		break;
+      if (m_crit_check_avg.get() > AUX_CRIT_THRESH) {
+        // Detected continuous charging - disables the poll on Dip.
+        ESP_LOGW(TAG, "Aux Battery state: Charging %g Dip %g - Ignored (Crit %g)!",
+            monitor.average_lastf(), monitor.diff_lastf(), m_crit_check_avg.get()/100.0 );
+      }
+      else {
 
-	case OvmsBatteryState::ChargingDip:
-		ESP_LOGD(TAG,"Aux Battery State: Charging (%g) with Dip (%g)",
-			monitor.average_lastf(),
-			monitor.diff_lastf()
-		);
-
-		if (ISPOLLING_OFF) {
-			ESP_LOGD(TAG, "Setting PollState to Ping (30)\n Reason: Charging Dip");
-			PollState_Ping(30);
-		}
-		break;
-
-	case OvmsBatteryState::ChargingBlip:
-		ESP_LOGD(TAG,"Aux Battery State: Charging (%g) with Spike (%g)",
-			monitor.average_lastf(),
-			monitor.diff_lastf()
-		);
-
-		if (ISPOLLING_OFF) {
-			ESP_LOGD(TAG, "Setting PollState to Ping (30)\n Reason: Charging Spike");
-			PollState_Ping(30);
-		}
-		break;
-
-	case OvmsBatteryState::Blip:
-		ESP_LOGD(TAG, "Aux Battery State: Spike (%g)", monitor.diff_lastf());
-		
-		if (ISPOLLING_OFF) {
-			ESP_LOGD(TAG, "Setting PollState to Ping (30)\n Reason: Spike");
-			PollState_Ping(30);
-		}
-		break;
-
-	case OvmsBatteryState::Dip:
-		ESP_LOGD(TAG, "Aux Battery State: Dip (%g)", monitor.diff_lastf());
-		
-		if (ISPOLLING_OFF) {
-			ESP_LOGD(TAG, "Setting PollState to Ping (30)\n Reason: Dip");
-			PollState_Ping(30);
-		}
-		break;
-
-	case OvmsBatteryState::Low:
-     	ESP_LOGD(TAG, "Aux Battery state: Low (%g)", monitor.diff_lastf());
-		if (!ISPOLLING_OFF) {
-			ESP_LOGD(TAG, "Setting PollState to Off (LV SOC Low)");
-			POLLSTATE_OFF
-		}
-      	m_b_aux_soc->SetValue( CalcAUXSoc(monitor.average_lastf()), Percentage );
-		break;
-	}
+        ESP_LOGD(TAG, "Aux Battery state: Charging %g Dip %g",
+            monitor.average_lastf(), monitor.diff_lastf());
+        if ( ISPOLLING_OFF) {
+          ESP_LOGD(TAG, "PollState->Ping for 180 (Charge Dip)");
+          PollState_Ping(180);
+        }
+      }
+      break;
+    case OvmsBatteryState::ChargingBlip:
+      if (m_crit_check_avg.get() > AUX_CRIT_THRESH) {
+        // Detected continuous charging - disables the poll on Charging Blip.
+        ESP_LOGW(TAG, "Aux Battery state: Charging %g Blip %g - Ignored (Crit %g)!",
+            monitor.average_lastf(), monitor.diff_lastf(), m_crit_check_avg.get()/100.0 );
+      }
+      else {
+        ESP_LOGD(TAG, "Aux Battery state: Charging %g Blip %g",
+            monitor.average_lastf(), monitor.diff_lastf());
+        if ( ISPOLLING_OFF) {
+          ESP_LOGD(TAG, "PollState->Ping for 180 (Charge Blip)");
+          PollState_Ping(180);
+        }
+      }
+      break;
+    case OvmsBatteryState::Blip: {
+      ESP_LOGD(TAG, "Aux Battery state: Blip %g", monitor.diff_lastf());
+      if ( ISPOLLING_OFF) {
+        ESP_LOGD(TAG, "PollState->Ping for 90 (Blip)");
+        PollState_Ping(90);
+      }
+    }
+    break;
+    case OvmsBatteryState::Dip: {
+      ESP_LOGD(TAG, "Aux Battery state: Dip %g", monitor.diff_lastf());
+      if ( ISPOLLING_OFF) {
+        ESP_LOGD(TAG, "PollState->Ping for 90 (Dip)");
+        PollState_Ping(90);
+      }
+    }
+    break;
+    case OvmsBatteryState::Low: {
+      ESP_LOGD(TAG, "Aux Battery state: Low %g", monitor.diff_lastf());
+      if (!ISPOLLING_OFF) {
+        ESP_LOGD(TAG, "PollState->Off (Aux Battery state Low)");
+        PollState_Off();
+        // ?? Turn other things off ??
+      }
+      m_b_aux_soc->SetValue( CalcAUXSoc(monitor.average_lastf()), Percentage );
+      return;
+    }
+  }
 }
 
 /**
